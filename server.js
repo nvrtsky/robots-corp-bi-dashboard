@@ -87,13 +87,13 @@ app.get('/api/stats/dashboard', async (req, res) => {
         }
 
         // Parallel fetch for efficiency
-        const [dealsWon, leads, dealsInProgress] = await Promise.all([
+        const [dealsWon, leads, dealsInProgress, allDeals, stages] = await Promise.all([
             // Revenue: Deals WON
             client.call('crm.deal.list', {
                 filter: { STAGE_ID: 'WON', ...dateFilter },
-                select: ['OPPORTUNITY', 'CURRENCY_ID']
+                select: ['OPPORTUNITY', 'CURRENCY_ID', 'ASSIGNED_BY_ID']
             }),
-            // Leads: All Leads (simplified)
+            // Leads: All Leads
             client.call('crm.lead.list', {
                 filter: { ...dateFilter },
                 select: ['ID', 'SOURCE_ID']
@@ -102,7 +102,14 @@ app.get('/api/stats/dashboard', async (req, res) => {
             client.call('crm.deal.list', {
                 filter: { '!STAGE_ID': ['WON', 'LOSE'], ...dateFilter },
                 select: ['ID', 'TITLE', 'OPPORTUNITY', 'ASSIGNED_BY_ID', 'DATE_CREATE', 'STAGE_ID']
-            })
+            }),
+            // All Deals for funnel (limited to recent)
+            client.call('crm.deal.list', {
+                filter: { ...dateFilter },
+                select: ['ID', 'STAGE_ID', 'ASSIGNED_BY_ID', 'OPPORTUNITY']
+            }),
+            // Deal stages for funnel labels
+            client.call('crm.dealcategory.stage.list', { id: 0 })
         ]);
 
         // Calculate Revenue
@@ -115,13 +122,84 @@ app.get('/api/stats/dashboard', async (req, res) => {
             sources[src] = (sources[src] || 0) + 1;
         });
 
+        // Build Funnel Data
+        const stageMap = {};
+        stages.result.forEach(stage => {
+            stageMap[stage.STATUS_ID] = stage.NAME;
+        });
+
+        const funnelData = {};
+        allDeals.result.forEach(deal => {
+            const stageName = stageMap[deal.STAGE_ID] || deal.STAGE_ID;
+            funnelData[stageName] = (funnelData[stageName] || 0) + 1;
+        });
+
+        // Build Manager Stats
+        const managerStats = {};
+        dealsWon.result.forEach(deal => {
+            const mgrId = deal.ASSIGNED_BY_ID || 'unknown';
+            if (!managerStats[mgrId]) {
+                managerStats[mgrId] = { count: 0, revenue: 0 };
+            }
+            managerStats[mgrId].count++;
+            managerStats[mgrId].revenue += parseFloat(deal.OPPORTUNITY || 0);
+        });
+
+        // Get manager names
+        const managerIds = Object.keys(managerStats).filter(id => id !== 'unknown');
+        let managers = [];
+        if (managerIds.length > 0) {
+            try {
+                const usersRes = await client.call('user.get', { ID: managerIds });
+                managers = managerIds.map(id => {
+                    const user = usersRes.result.find(u => String(u.ID) === String(id));
+                    return {
+                        id,
+                        name: user ? `${user.NAME} ${user.LAST_NAME}`.trim() : `Менеджер ${id}`,
+                        deals: managerStats[id].count,
+                        revenue: managerStats[id].revenue
+                    };
+                }).sort((a, b) => b.revenue - a.revenue);
+            } catch (e) {
+                console.log('[API] Could not fetch user names:', e.message);
+                managers = managerIds.map(id => ({
+                    id,
+                    name: `Менеджер ${id}`,
+                    deals: managerStats[id].count,
+                    revenue: managerStats[id].revenue
+                }));
+            }
+        }
+
+        // Calculate deal duration (days in progress)
+        const dealsWithDuration = dealsInProgress.result.slice(0, 10).map(deal => {
+            const created = new Date(deal.DATE_CREATE);
+            const now = new Date();
+            const daysInProgress = Math.floor((now - created) / (1000 * 60 * 60 * 24));
+            return {
+                ...deal,
+                daysInProgress,
+                stageName: stageMap[deal.STAGE_ID] || deal.STAGE_ID
+            };
+        });
+
+        // Calculate conversion rate
+        const totalDeals = allDeals.total || allDeals.result.length;
+        const wonDeals = dealsWon.total || dealsWon.result.length;
+        const conversionRate = totalDeals > 0 ? ((wonDeals / totalDeals) * 100).toFixed(1) : 0;
+
         // Response
         res.json({
-            revenue: revenue,
-            leadsCount: leads.total, // .total only if detailed count requested, else .result.length (pagination limits apply)
-            dealsInProgressCount: dealsInProgress.total,
-            dealsInProgress: dealsInProgress.result.slice(0, 5), // Top 5
-            sources: sources
+            revenue,
+            leadsCount: leads.total || leads.result.length,
+            dealsInProgressCount: dealsInProgress.total || dealsInProgress.result.length,
+            dealsInProgress: dealsWithDuration,
+            sources,
+            funnel: funnelData,
+            managers: managers.slice(0, 6),
+            conversionRate: parseFloat(conversionRate),
+            totalDeals,
+            wonDeals
         });
 
     } catch (e) {

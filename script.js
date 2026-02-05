@@ -120,6 +120,11 @@ function updateDashboardUI(data) {
     updateKPI('.kpi-card.leads .kpi-value', data.leadsCount);
     updateKPI('.kpi-card.deals .kpi-value', data.dealsInProgressCount);
 
+    // Update Conversion KPI if available
+    if (data.conversionRate !== undefined) {
+        updateKPI('.kpi-card.conversion .kpi-value', data.conversionRate, '', '%');
+    }
+
     // 2. Update Sources Donut Chart
     if (data.sources) {
         updateDonutChart(data.sources);
@@ -129,12 +134,22 @@ function updateDashboardUI(data) {
     if (data.dealsInProgress && data.dealsInProgress.length > 0) {
         updateDealsTable(data.dealsInProgress);
     }
+
+    // 4. Update Manager Stats
+    if (data.managers && data.managers.length > 0) {
+        updateManagersChart(data.managers);
+    }
+
+    // 5. Update Funnel
+    if (data.funnel) {
+        updateFunnelChart(data.funnel);
+    }
 }
 
-function updateKPI(selector, value, prefix = '') {
+function updateKPI(selector, value, prefix = '', suffix = '') {
     const el = document.querySelector(selector);
     if (el) {
-        el.textContent = prefix + formatNumber(value);
+        el.textContent = prefix + formatNumber(value) + suffix;
     }
 }
 
@@ -163,21 +178,78 @@ function updateDealsTable(deals) {
     const tbody = document.querySelector('.deals-table tbody');
     if (!tbody) return;
 
-    tbody.innerHTML = deals.map(deal => `
+    tbody.innerHTML = deals.map(deal => {
+        // Duration badge color
+        let durationClass = 'normal';
+        const days = deal.daysInProgress || 0;
+        if (days > 60) durationClass = 'critical';
+        else if (days > 30) durationClass = 'warning';
+
+        return `
         <tr>
             <td class="deal-name">
                 <span class="deal-id">#${deal.ID}</span>
-                ${deal.TITLE}
+                ${deal.TITLE || 'Без названия'}
             </td>
-            <td>—</td> <!-- Client name requires extra fetch -->
+            <td>—</td>
             <td>
                 <div class="cell-avatar">ID${deal.ASSIGNED_BY_ID}</div>
             </td>
-            <td><span class="stage-badge">${deal.STAGE_ID}</span></td>
+            <td><span class="stage-badge">${deal.stageName || deal.STAGE_ID}</span></td>
             <td class="deal-amount">₽ ${formatNumber(deal.OPPORTUNITY || 0)}</td>
-            <td><span class="duration normal">Now</span></td>
+            <td><span class="duration ${durationClass}">${days} дн.</span></td>
         </tr>
-    `).join('');
+    `;
+    }).join('');
+}
+
+// Update Managers Chart
+function updateManagersChart(managers) {
+    const container = document.querySelector('.manager-bars');
+    if (!container) return;
+
+    const maxRevenue = Math.max(...managers.map(m => m.revenue));
+
+    container.innerHTML = managers.map(manager => {
+        const percent = maxRevenue > 0 ? (manager.revenue / maxRevenue * 100) : 0;
+        return `
+        <div class="manager-bar">
+            <div class="manager-info">
+                <div class="manager-avatar">${manager.name.charAt(0)}</div>
+                <span class="manager-name">${manager.name}</span>
+            </div>
+            <div class="bar-container">
+                <div class="bar" style="width: ${percent}%"></div>
+                <span class="bar-value">₽ ${formatNumber(manager.revenue)}</span>
+            </div>
+        </div>
+    `;
+    }).join('');
+}
+
+// Update Funnel Chart
+function updateFunnelChart(funnel) {
+    const container = document.querySelector('.funnel-stages');
+    if (!container) return;
+
+    const stages = Object.entries(funnel);
+    const maxCount = Math.max(...stages.map(([_, count]) => count));
+
+    container.innerHTML = stages.map(([name, count], idx) => {
+        const percent = maxCount > 0 ? (count / maxCount * 100) : 0;
+        const colors = ['#2fc6f6', '#9dcf00', '#ffa900', '#ff5752', '#ab7fe6'];
+        const color = colors[idx % colors.length];
+        return `
+        <div class="funnel-stage">
+            <div class="stage-label">${name}</div>
+            <div class="stage-bar-container">
+                <div class="stage-bar" style="width: ${percent}%; background: ${color}">
+                    <span class="stage-count">${count}</span>
+                </div>
+            </div>
+        </div>
+    `;
+    }).join('');
 }
 
 // Period Filter Buttons
