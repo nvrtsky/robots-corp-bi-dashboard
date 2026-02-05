@@ -155,23 +155,42 @@ function updateKPI(selector, value, prefix = '', suffix = '') {
 
 function updateDonutChart(sources) {
     const total = Object.values(sources).reduce((a, b) => a + b, 0);
-    const radius = 45;
-    const circumference = 2 * Math.PI * radius; // ~282.74
-    let offset = 0;
+    if (total === 0) return;
 
-    // Map source IDs to classes (simplified mapping)
-    const classMap = {
-        'WEB': 'website',
-        'ADVERTISING': 'ads',
-        'PARTNER': 'partners',
-        'RECOMMENDATION': 'referral',
-        'OTHER': 'other'
+    // Update center text
+    const centerTotal = document.querySelector('.donut-total');
+    if (centerTotal) centerTotal.textContent = formatNumber(total);
+
+    // Source color mapping
+    const sourceColors = {
+        'WEB': { class: 'website', name: 'Сайт', color: '#6366f1' },
+        'ADVERTISING': { class: 'social', name: 'Реклама', color: '#8b5cf6' },
+        'PARTNER': { class: 'referral', name: 'Партнёры', color: '#a855f7' },
+        'RECOMMENDATION': { class: 'direct', name: 'Рекомендации', color: '#ec4899' },
+        'CALL': { class: 'website', name: 'Звонки', color: '#2fc6f6' },
+        'OTHER': { class: 'other', name: 'Другие', color: '#14b8a6' }
     };
 
-    // Update segments
-    // Note: This is a simplified update that assumes standard standard sources.
-    // For a robust implementation, we would need to regenerate the SVG elements.
-    // Here we just accept that we might not match all source types perfectly.
+    // Update legend
+    const legend = document.querySelector('.sources-legend');
+    if (legend) {
+        legend.innerHTML = Object.entries(sources).map(([sourceId, count]) => {
+            const src = sourceColors[sourceId] || { class: 'other', name: sourceId, color: '#64748b' };
+            const percent = ((count / total) * 100).toFixed(0);
+            return `
+            <div class="source-item">
+                <div class="source-color" style="background: ${src.color}"></div>
+                <div class="source-info">
+                    <span class="source-name">${src.name}</span>
+                    <span class="source-stat">${count} (${percent}%)</span>
+                </div>
+                <div class="source-bar">
+                    <div class="source-fill" style="width: ${percent}%; background: ${src.color}"></div>
+                </div>
+            </div>
+        `;
+        }).join('');
+    }
 }
 
 function updateDealsTable(deals) {
@@ -205,7 +224,7 @@ function updateDealsTable(deals) {
 
 // Update Managers Chart
 function updateManagersChart(managers) {
-    const container = document.querySelector('.manager-bars');
+    const container = document.querySelector('.managers-list');
     if (!container) return;
 
     const maxRevenue = Math.max(...managers.map(m => m.revenue));
@@ -229,7 +248,7 @@ function updateManagersChart(managers) {
 
 // Update Funnel Chart
 function updateFunnelChart(funnel) {
-    const container = document.querySelector('.funnel-stages');
+    const container = document.querySelector('.funnel-container');
     if (!container) return;
 
     const stages = Object.entries(funnel);
