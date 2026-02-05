@@ -1,49 +1,70 @@
 /* ===================================
    CSS Variables & Design System
+   Bitrix24 Style - Light Theme
    =================================== */
 :root {
-    /* Dark Theme Colors */
-    --bg-primary: #0f1117;
-    --bg-secondary: #161a23;
-    --bg-tertiary: #1c2029;
-    --bg-card: #1a1f2e;
-    --bg-card-hover: #222838;
+    /* Bitrix24 Light Theme Colors */
+    --bg-primary: #f5f7fa;
+    --bg-secondary: #ffffff;
+    --bg-tertiary: #ebeef2;
+    --bg-card: #ffffff;
+    --bg-card-hover: #f8f9fb;
 
-    /* Accent Colors */
-    --accent-primary: #6366f1;
-    --accent-primary-glow: rgba(99, 102, 241, 0.3);
-    --accent-secondary: #8b5cf6;
-    --accent-tertiary: #a855f7;
+    /* Bitrix24 Accent Colors */
+    --accent-primary: #2fc6f6;
+    /* Bitrix24 голубой */
+    --accent-primary-glow: rgba(47, 198, 246, 0.2);
+    --accent-secondary: #0fa4d5;
+    /* Темнее голубой */
+    --accent-tertiary: #535c69;
+    /* Серый текст */
 
-    /* Status Colors */
-    --success: #10b981;
-    --success-glow: rgba(16, 185, 129, 0.2);
-    --warning: #f59e0b;
-    --warning-glow: rgba(245, 158, 11, 0.2);
-    --danger: #ef4444;
-    --danger-glow: rgba(239, 68, 68, 0.2);
-    --info: #3b82f6;
-    --info-glow: rgba(59, 130, 246, 0.2);
+    /* Bitrix24 Sidebar */
+    --sidebar-bg: #0e2f5a;
+    /* Тёмно-синий */
+    --sidebar-hover: #1a3d6d;
+    --sidebar-active: #2563eb;
+    --sidebar-text: #ffffff;
+    --sidebar-text-muted: rgba(255, 255, 255, 0.7);
 
-    /* Chart Colors */
-    --chart-1: #6366f1;
-    --chart-2: #8b5cf6;
-    --chart-3: #a855f7;
-    --chart-4: #ec4899;
-    --chart-5: #14b8a6;
+    /* Status Colors (Bitrix24 style) */
+    --success: #9dcf00;
+    /* Зелёный бейдж */
+    --success-glow: rgba(157, 207, 0, 0.2);
+    --warning: #ffa900;
+    /* Оранжевый */
+    --warning-glow: rgba(255, 169, 0, 0.2);
+    --danger: #ff5752;
+    /* Красный */
+    --danger-glow: rgba(255, 87, 82, 0.2);
+    --info: #2fc6f6;
+    /* Голубой */
+    --info-glow: rgba(47, 198, 246, 0.2);
+
+    /* Chart Colors (Bitrix24 palette) */
+    --chart-1: #2fc6f6;
+    /* Голубой */
+    --chart-2: #9dcf00;
+    /* Зелёный */
+    --chart-3: #ffa900;
+    /* Оранжевый */
+    --chart-4: #ff5752;
+    /* Красный */
+    --chart-5: #ab7fe6;
+    /* Фиолетовый */
 
     /* Text Colors */
-    --text-primary: #f1f5f9;
-    --text-secondary: #94a3b8;
-    --text-tertiary: #64748b;
+    --text-primary: #333333;
+    --text-secondary: #535c69;
+    --text-tertiary: #828b95;
 
     /* Border & Shadow */
-    --border-color: rgba(255, 255, 255, 0.08);
-    --border-glow: rgba(99, 102, 241, 0.3);
-    --shadow-sm: 0 2px 8px rgba(0, 0, 0, 0.3);
-    --shadow-md: 0 4px 20px rgba(0, 0, 0, 0.4);
-    --shadow-lg: 0 8px 40px rgba(0, 0, 0, 0.5);
-    --shadow-glow: 0 0 30px rgba(99, 102, 241, 0.15);
+    --border-color: #e0e2e5;
+    --border-glow: rgba(47, 198, 246, 0.3);
+    --shadow-sm: 0 1px 3px rgba(0, 0, 0, 0.08);
+    --shadow-md: 0 2px 8px rgba(0, 0, 0, 0.1);
+    --shadow-lg: 0 4px 16px rgba(0, 0, 0, 0.12);
+    --shadow-glow: 0 0 20px rgba(47, 198, 246, 0.15);
 
     /* Spacing */
     --spacing-xs: 4px;
@@ -54,10 +75,10 @@
     --spacing-2xl: 48px;
 
     /* Border Radius */
-    --radius-sm: 6px;
-    --radius-md: 10px;
-    --radius-lg: 16px;
-    --radius-xl: 24px;
+    --radius-sm: 4px;
+    --radius-md: 8px;
+    --radius-lg: 12px;
+    --radius-xl: 16px;
 
     /* Transitions */
     --transition-fast: 0.15s ease;
@@ -65,7 +86,7 @@
     --transition-slow: 0.4s ease;
 
     /* Sidebar */
-    --sidebar-width: 260px;
+    --sidebar-width: 240px;
 }
 
 /* ===================================
@@ -124,12 +145,11 @@ body.bitrix-mode .app {
 }
 
 /* ===================================
-   Sidebar
+   Sidebar (Bitrix24 Dark Blue Style)
    =================================== */
 .sidebar {
     width: var(--sidebar-width);
-    background: var(--bg-secondary);
-    border-right: 1px solid var(--border-color);
+    background: var(--sidebar-bg);
     display: flex;
     flex-direction: column;
     position: fixed;
@@ -139,7 +159,7 @@ body.bitrix-mode .app {
 
 .sidebar-header {
     padding: var(--spacing-lg);
-    border-bottom: 1px solid var(--border-color);
+    border-bottom: 1px solid rgba(255, 255, 255, 0.1);
 }
 
 .logo {
@@ -149,29 +169,25 @@ body.bitrix-mode .app {
 }
 
 .logo-icon {
-    width: 40px;
-    height: 40px;
+    width: 36px;
+    height: 36px;
     background: linear-gradient(135deg, var(--accent-primary), var(--accent-secondary));
     border-radius: var(--radius-md);
     display: flex;
     align-items: center;
     justify-content: center;
-    box-shadow: var(--shadow-glow);
 }
 
 .logo-icon svg {
-    width: 24px;
-    height: 24px;
+    width: 20px;
+    height: 20px;
     color: white;
 }
 
 .logo-text {
-    font-size: 1.25rem;
-    font-weight: 700;
-    background: linear-gradient(135deg, var(--text-primary), var(--accent-primary));
-    -webkit-background-clip: text;
-    -webkit-text-fill-color: transparent;
-    background-clip: text;
+    font-size: 1.1rem;
+    font-weight: 600;
+    color: var(--sidebar-text);
 }
 
 .sidebar-nav {
@@ -188,7 +204,7 @@ body.bitrix-mode .app {
     gap: var(--spacing-md);
     padding: var(--spacing-md) var(--spacing-lg);
     border-radius: var(--radius-md);
-    color: var(--text-secondary);
+    color: var(--sidebar-text-muted);
     text-decoration: none;
     transition: all var(--transition-normal);
     position: relative;
@@ -201,14 +217,13 @@ body.bitrix-mode .app {
 }
 
 .nav-item:hover {
-    color: var(--text-primary);
-    background: rgba(255, 255, 255, 0.05);
+    color: var(--sidebar-text);
+    background: var(--sidebar-hover);
 }
 
 .nav-item.active {
-    color: white;
-    background: linear-gradient(135deg, rgba(99, 102, 241, 0.2), rgba(139, 92, 246, 0.15));
-    border: 1px solid var(--border-glow);
+    color: var(--sidebar-text);
+    background: var(--sidebar-active);
 }
 
 .nav-item.active::before {
@@ -219,13 +234,13 @@ body.bitrix-mode .app {
     transform: translateY(-50%);
     width: 3px;
     height: 60%;
-    background: linear-gradient(180deg, var(--accent-primary), var(--accent-secondary));
+    background: var(--accent-primary);
     border-radius: 0 2px 2px 0;
 }
 
 .sidebar-footer {
     padding: var(--spacing-lg);
-    border-top: 1px solid var(--border-color);
+    border-top: 1px solid rgba(255, 255, 255, 0.1);
 }
 
 .user-profile {
@@ -235,15 +250,16 @@ body.bitrix-mode .app {
 }
 
 .user-avatar {
-    width: 40px;
-    height: 40px;
+    width: 36px;
+    height: 36px;
     border-radius: 50%;
-    background: linear-gradient(135deg, var(--accent-primary), var(--accent-tertiary));
+    background: var(--accent-primary);
     display: flex;
     align-items: center;
     justify-content: center;
     font-weight: 600;
     font-size: 0.875rem;
+    color: white;
 }
 
 .user-info {
@@ -254,10 +270,11 @@ body.bitrix-mode .app {
 .user-name {
     font-weight: 600;
     font-size: 0.875rem;
+    color: var(--sidebar-text);
 }
 
 .user-role {
-    color: var(--text-tertiary);
+    color: var(--sidebar-text-muted);
     font-size: 0.75rem;
 }
 
