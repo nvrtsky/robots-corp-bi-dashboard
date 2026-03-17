@@ -3,6 +3,9 @@
 // Bitrix24 Integration
 let isInBitrix = false;
 let bitrixDomain = null;
+let currentPeriod = 'week'; // day, week, month
+let currentCategory = 'all'; // funnel category ID ('all' = all funnels)
+let funnelsList = []; // loaded funnels
 
 // Check if running in Bitrix24 context
 function detectBitrixContext() {
@@ -25,17 +28,40 @@ function initBitrix24() {
 
     // 2. SDK Initialization (if available and valid)
     if (typeof window.BX24 !== 'undefined' && window.BX24) {
+        console.log('[Bitrix24] BX24 SDK found, initializing...');
         try {
             window.BX24.init(() => {
-                console.log('[Bitrix24] SDK initialized');
+                console.log('[Bitrix24] SDK initialized successfully');
 
                 // Set flag
                 isInBitrix = true;
 
-                // Get auth info
+                // Try multiple ways to get domain
                 const auth = window.BX24.getAuth();
+                console.log('[Bitrix24] Auth object:', JSON.stringify(auth));
+
                 if (auth && auth.domain) {
                     bitrixDomain = auth.domain;
+                    console.log('[Bitrix24] Domain from getAuth():', bitrixDomain);
+                } else {
+                    // Fallback: try to get from placement info
+                    try {
+                        const placement = window.BX24.placement.info();
+                        console.log('[Bitrix24] Placement info:', JSON.stringify(placement));
+                        if (placement && placement.placement) {
+                            // Extract domain from DOMAIN parameter if available
+                            const urlParams = new URLSearchParams(window.location.search);
+                            bitrixDomain = urlParams.get('DOMAIN');
+                        }
+                    } catch (e) {
+                        console.log('[Bitrix24] Placement info not available');
+                    }
+                }
+
+                // Final fallback: hard-coded domain for this specific portal
+                if (!bitrixDomain) {
+                    bitrixDomain = 'robotcorporation.bitrix24.ru';
+                    console.log('[Bitrix24] Using hardcoded fallback domain:', bitrixDomain);
                 }
 
                 // Ensure Bitrix mode is applied (if not already by URL check)
@@ -43,6 +69,11 @@ function initBitrix24() {
 
                 // Auto-resize iframe to fit content
                 setupAutoResize();
+
+                // Load funnels and then fetch data
+                console.log('[Bitrix24] Calling loadFunnels and fetchDashboardData with domain:', bitrixDomain);
+                loadFunnels();
+                fetchDashboardData();
             });
         } catch (e) {
             console.warn('[Bitrix24] SDK found but init failed:', e);
@@ -84,24 +115,108 @@ document.addEventListener('DOMContentLoaded', () => {
     initAnimations();
     initRefreshButton();
 
-    // Fetch real data
-    fetchDashboardData();
+    // Fetch real data - only if NOT running in Bitrix24 context
+    // If BX24 SDK is available, fetchDashboardData will be called from BX24.init callback
+    if (typeof window.BX24 === 'undefined' || !window.BX24) {
+        console.log('[Dashboard] No BX24 SDK, fetching data immediately');
+        loadFunnels(); // Load funnel tabs first
+        fetchDashboardData();
+    }
 });
 
+// Load available funnels (deal categories)
+async function loadFunnels() {
+    try {
+        let apiUrl = '/api/funnels';
+        if (bitrixDomain) {
+            apiUrl += `?domain=${encodeURIComponent(bitrixDomain)}`;
+        }
+
+        const response = await fetch(apiUrl);
+        const data = await response.json();
+
+        if (data.funnels && data.funnels.length > 0) {
+            funnelsList = data.funnels;
+            renderFunnelTabs();
+            console.log('[Dashboard] Funnels loaded:', funnelsList.length);
+        }
+    } catch (e) {
+        console.error('[Dashboard] Failed to load funnels:', e);
+    }
+}
+
+// Render funnel dropdown options
+function renderFunnelTabs() {
+    const select = document.getElementById('funnel-select');
+    if (!select) return;
+
+    // Keep "All" option, add others
+    select.innerHTML = '<option value="all">Все воронки</option>';
+
+    // Add options for each funnel
+    funnelsList.forEach(funnel => {
+        const option = document.createElement('option');
+        option.value = funnel.ID;
+        option.textContent = funnel.NAME;
+        if (currentCategory === funnel.ID) {
+            option.selected = true;
+        }
+        select.appendChild(option);
+    });
+
+    // Add change event listener (only once)
+    if (!select.dataset.initialized) {
+        select.addEventListener('change', (e) => {
+            switchFunnel(e.target.value);
+        });
+        select.dataset.initialized = 'true';
+    }
+}
+
+// Switch funnel
+function switchFunnel(categoryId) {
+    currentCategory = categoryId;
+
+    // Refetch data for this funnel
+    fetchDashboardData();
+}
+
 // Fetch Real Data from API
-async function fetchDashboardData() {
-    if (!bitrixDomain) {
-        console.log('[Dashboard] No domain detected, using demo data');
-        return;
+async function fetchDashboardData(period = currentPeriod) {
+    currentPeriod = period;
+
+    // Calculate date range based on period
+    const today = new Date();
+    let dateFrom = new Date();
+
+    if (period === 'day') {
+        dateFrom.setDate(today.getDate() - 1);
+    } else if (period === 'week') {
+        dateFrom.setDate(today.getDate() - 7);
+    } else if (period === 'month') {
+        dateFrom.setMonth(today.getMonth() - 1);
+    }
+
+    const dateFromStr = dateFrom.toISOString().split('T')[0];
+    const dateToStr = today.toISOString().split('T')[0];
+
+    // Build API URL with category filter
+    let apiUrl = `/api/stats/dashboard?dateFrom=${dateFromStr}&dateTo=${dateToStr}`;
+    if (bitrixDomain) {
+        apiUrl += `&domain=${encodeURIComponent(bitrixDomain)}`;
+    }
+    if (currentCategory && currentCategory !== 'all') {
+        apiUrl += `&categoryId=${encodeURIComponent(currentCategory)}`;
     }
 
     try {
-        const response = await fetch(`/api/stats/dashboard?domain=${encodeURIComponent(bitrixDomain)}`);
+        console.log('[Dashboard] Fetching data for period:', period, '| category:', currentCategory, '| URL:', apiUrl);
+        const response = await fetch(apiUrl);
         const data = await response.json();
 
-        if (data.isDemo || data.error) {
-            console.warn('[Dashboard] API returned demo/error:', data.error);
-            return; // Keep static demo data
+        if (data.error) {
+            console.warn('[Dashboard] API error:', data.error);
+            return;
         }
 
         updateDashboardUI(data);
@@ -128,6 +243,7 @@ function updateDashboardUI(data) {
     // 2. Update Sources Donut Chart
     if (data.sources) {
         updateDonutChart(data.sources);
+        updateChannelsChart(data.sources); // Update channels section too
     }
 
     // 3. Update Deals Table
@@ -148,8 +264,11 @@ function updateDashboardUI(data) {
 
 function updateKPI(selector, value, prefix = '', suffix = '') {
     const el = document.querySelector(selector);
+    console.log('[Dashboard] updateKPI:', selector, '-> element:', el, '| value:', value);
     if (el) {
         el.textContent = prefix + formatNumber(value) + suffix;
+    } else {
+        console.warn('[Dashboard] Element not found:', selector);
     }
 }
 
@@ -219,6 +338,57 @@ function updateDealsTable(deals) {
             <td><span class="duration ${durationClass}">${days} дн.</span></td>
         </tr>
     `;
+    }).join('');
+}
+
+// Update Channels Chart (Эффективность каналов)
+function updateChannelsChart(sources) {
+    const container = document.getElementById('channels-container');
+    if (!container) return;
+
+    const total = Object.values(sources).reduce((a, b) => a + b, 0);
+    if (total === 0) {
+        container.innerHTML = '<div class="no-data">Нет данных по каналам</div>';
+        return;
+    }
+
+    // Sort sources by count descending
+    const sortedSources = Object.entries(sources)
+        .sort((a, b) => b[1] - a[1])
+        .slice(0, 8); // Show top 8
+
+    const maxCount = sortedSources[0][1];
+
+    // Channel icons mapping
+    const channelIcons = {
+        'default': `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><line x1="2" y1="12" x2="22" y2="12"/><path d="M12 2a15.3 15.3 0 0 1 4 10 15.3 15.3 0 0 1-4 10 15.3 15.3 0 0 1-4-10 15.3 15.3 0 0 1 4-10z"/></svg>`
+    };
+
+    // Color palette for channels
+    const colors = ['#2fc6f6', '#ffa900', '#9dcf00', '#ff5752', '#ab7fe6', '#ec4899', '#14b8a6', '#6366f1'];
+
+    container.innerHTML = sortedSources.map(([name, count], index) => {
+        const percentage = ((count / total) * 100).toFixed(1);
+        const barWidth = ((count / maxCount) * 100).toFixed(0);
+        const color = colors[index % colors.length];
+
+        return `
+            <div class="channel-row">
+                <div class="channel-info">
+                    <div class="channel-icon" style="background: ${color}20; color: ${color};">
+                        ${channelIcons.default}
+                    </div>
+                    <div class="channel-name">
+                        <span>${name}</span>
+                        <span class="channel-leads">${count} лидов</span>
+                    </div>
+                </div>
+                <div class="channel-bar-container">
+                    <div class="channel-bar" style="width: ${barWidth}%; background: ${color};"></div>
+                    <span class="channel-value">${percentage}%</span>
+                </div>
+            </div>
+        `;
     }).join('');
 }
 
@@ -296,8 +466,8 @@ function initFilters() {
                 dateRange.textContent = `${formatDate(monthAgo)} — ${formatDate(today)}`;
             }
 
-            // Simulate data refresh with animation
-            animateDataRefresh();
+            // Fetch real data for selected period
+            fetchDashboardData(period);
         });
     });
 
@@ -391,42 +561,11 @@ function initAnimations() {
     animateCounters();
 }
 
-// Animate counters
+// Animate counters - DISABLED to prevent overwriting real API data
 function animateCounters() {
-    const kpiValues = document.querySelectorAll('.kpi-value');
-
-    kpiValues.forEach(el => {
-        const text = el.textContent;
-        const hasNumber = /[\d,]+/.test(text);
-
-        if (hasNumber) {
-            const match = text.match(/(.*?)([\d,]+)(.*)/);
-            if (match) {
-                const prefix = match[1];
-                const numStr = match[2].replace(/,/g, '');
-                const suffix = match[3];
-                const target = parseInt(numStr);
-
-                if (!isNaN(target)) {
-                    let current = 0;
-                    const duration = 1500;
-                    const step = target / (duration / 16);
-
-                    const animate = () => {
-                        current += step;
-                        if (current < target) {
-                            el.textContent = prefix + formatNumber(Math.floor(current)) + suffix;
-                            requestAnimationFrame(animate);
-                        } else {
-                            el.textContent = text;
-                        }
-                    };
-
-                    setTimeout(animate, 500);
-                }
-            }
-        }
-    });
+    // Animation disabled - it was overwriting real data loaded from API
+    // with demo values from the original HTML
+    console.log('[Dashboard] Counter animation disabled to preserve API data');
 }
 
 // Format number with commas

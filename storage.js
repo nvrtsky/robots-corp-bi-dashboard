@@ -45,6 +45,12 @@ const db = {
     getTokens: (domain) => {
         const data = db.read();
         return data.portals[domain];
+    },
+
+    // Get all portals/tokens
+    getAll: () => {
+        const data = db.read();
+        return data.portals || {};
     }
 };
 

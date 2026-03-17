@@ -259,12 +259,11 @@
                 <div class="chart-card funnel-card">
                     <div class="chart-header">
                         <h3>Воронка продаж</h3>
-                        <div class="chart-legend">
-                            <span class="legend-item"><span class="legend-dot stage1"></span>Новые</span>
-                            <span class="legend-item"><span class="legend-dot stage2"></span>Квалификация</span>
-                            <span class="legend-item"><span class="legend-dot stage3"></span>Переговоры</span>
-                            <span class="legend-item"><span class="legend-dot stage4"></span>Закрыто</span>
-                        </div>
+                        <!-- Funnel dropdown selector -->
+                        <select id="funnel-select" class="funnel-select">
+                            <option value="all">Все воронки</option>
+                            <!-- Options loaded dynamically -->
+                        </select>
                     </div>
                     <div class="funnel-container">
                         <div class="funnel-stage stage-1">
@@ -614,13 +613,12 @@
                         <div class="channel-metrics">
                             <button class="metric-btn active">Конверсия</button>
                             <button class="metric-btn">Лиды</button>
-                            <button class="metric-btn">ROI</button>
                         </div>
                     </div>
-                    <div class="channels-chart">
+                    <div id="channels-container" class="channels-chart">
                         <div class="channel-row">
                             <div class="channel-info">
-                                <div class="channel-icon website">
+                                <div class="channel-icon" style="background: #2fc6f620; color: #2fc6f6;">
                                     <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
                                         <circle cx="12" cy="12" r="10" />
                                         <line x1="2" y1="12" x2="22" y2="12" />
@@ -634,16 +632,18 @@
                                 </div>
                             </div>
                             <div class="channel-bar-container">
-                                <div class="channel-bar website" style="width: 78%"></div>
+                                <div class="channel-bar" style="width: 88%; background: #2fc6f6;"></div>
                                 <span class="channel-value">28.4%</span>
                             </div>
                         </div>
                         <div class="channel-row">
                             <div class="channel-info">
-                                <div class="channel-icon ads">
+                                <div class="channel-icon" style="background: #ffa90020; color: #ffa900;">
                                     <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                                        <rect x="2" y="7" width="20" height="14" rx="2" ry="2" />
-                                        <path d="M16 21V5a2 2 0 0 0-2-2h-4a2 2 0 0 0-2 2v16" />
+                                        <circle cx="12" cy="12" r="10" />
+                                        <line x1="2" y1="12" x2="22" y2="12" />
+                                        <path
+                                            d="M12 2a15.3 15.3 0 0 1 4 10 15.3 15.3 0 0 1-4 10 15.3 15.3 0 0 1-4-10 15.3 15.3 0 0 1 4-10z" />
                                     </svg>
                                 </div>
                                 <div class="channel-name">
@@ -652,49 +652,51 @@
                                 </div>
                             </div>
                             <div class="channel-bar-container">
-                                <div class="channel-bar ads" style="width: 65%"></div>
+                                <div class="channel-bar" style="width: 75%; background: #ffa900;"></div>
                                 <span class="channel-value">23.6%</span>
                             </div>
                         </div>
                         <div class="channel-row">
                             <div class="channel-info">
-                                <div class="channel-icon social">
+                                <div class="channel-icon" style="background: #9dcf0020; color: #9dcf00;">
                                     <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                                        <path d="M18 2h-3a5 5 0 0 0-5 5v3H7v4h3v8h4v-8h3l1-4h-4V7a1 1 0 0 1 1-1h3z" />
+                                        <circle cx="12" cy="12" r="10" />
+                                        <line x1="2" y1="12" x2="22" y2="12" />
+                                        <path
+                                            d="M12 2a15.3 15.3 0 0 1 4 10 15.3 15.3 0 0 1-4 10 15.3 15.3 0 0 1-4-10 15.3 15.3 0 0 1 4-10z" />
                                     </svg>
                                 </div>
                                 <div class="channel-name">
                                     <span>Социальные сети</span>
-                                    <span class="channel-leads">169 лидов</span>
+                                    <span class="channel-leads">189 лидов</span>
                                 </div>
                             </div>
                             <div class="channel-bar-container">
-                                <div class="channel-bar social" style="width: 52%"></div>
+                                <div class="channel-bar" style="width: 60%; background: #9dcf00;"></div>
                                 <span class="channel-value">18.9%</span>
                             </div>
                         </div>
                         <div class="channel-row">
                             <div class="channel-info">
-                                <div class="channel-icon email">
+                                <div class="channel-icon" style="background: #ff575220; color: #ff5752;">
                                     <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                                        <path
-                                            d="M4 4h16c1.1 0 2 .9 2 2v12c0 1.1-.9 2-2 2H4c-1.1 0-2-.9-2-2V6c0-1.1.9-2 2-2z" />
-                                        <polyline points="22,6 12,13 2,6" />
+                                        <rect x="2" y="4" width="20" height="16" rx="2" />
+                                        <path d="M22 7l-10 7L2 7" />
                                     </svg>
                                 </div>
                                 <div class="channel-name">
                                     <span>Email-рассылки</span>
-                                    <span class="channel-leads">85 лидов</span>
+                                    <span class="channel-leads">84 лида</span>
                                 </div>
                             </div>
                             <div class="channel-bar-container">
-                                <div class="channel-bar email" style="width: 42%"></div>
+                                <div class="channel-bar" style="width: 48%; background: #ff5752;"></div>
                                 <span class="channel-value">15.3%</span>
                             </div>
                         </div>
                         <div class="channel-row">
                             <div class="channel-info">
-                                <div class="channel-icon partners">
+                                <div class="channel-icon" style="background: #ab7fe620; color: #ab7fe6;">
                                     <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
                                         <path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2" />
                                         <circle cx="9" cy="7" r="4" />
@@ -708,7 +710,7 @@
                                 </div>
                             </div>
                             <div class="channel-bar-container">
-                                <div class="channel-bar partners" style="width: 89%"></div>
+                                <div class="channel-bar" style="width: 95%; background: #ab7fe6;"></div>
                                 <span class="channel-value">32.1%</span>
                             </div>
                         </div>

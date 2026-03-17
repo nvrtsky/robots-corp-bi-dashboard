@@ -1,0 +1,619 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+<meta charset="UTF-8">
+<title>ТЗ — BI Analytics Dashboard v2.0</title>
+<style>
+@page {
+  size: A4;
+  margin: 20mm 18mm 20mm 18mm;
+}
+* { box-sizing: border-box; margin: 0; padding: 0; }
+body {
+  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+  font-size: 11pt;
+  line-height: 1.55;
+  color: #1a1a1a;
+  padding: 0;
+}
+h1 {
+  font-size: 22pt;
+  color: #0e2f5a;
+  border-bottom: 3px solid #2fc6f6;
+  padding-bottom: 8px;
+  margin: 28px 0 12px 0;
+  page-break-after: avoid;
+}
+h1:first-of-type { margin-top: 0; }
+h2 {
+  font-size: 16pt;
+  color: #0e2f5a;
+  border-bottom: 1px solid #e0e2e5;
+  padding-bottom: 5px;
+  margin: 22px 0 10px 0;
+  page-break-after: avoid;
+}
+h3 {
+  font-size: 13pt;
+  color: #333;
+  margin: 16px 0 8px 0;
+  page-break-after: avoid;
+}
+h4 {
+  font-size: 11pt;
+  color: #535c69;
+  margin: 12px 0 6px 0;
+  page-break-after: avoid;
+}
+p { margin: 6px 0; }
+strong { color: #0e2f5a; }
+hr { border: none; border-top: 1px solid #e0e2e5; margin: 16px 0; }
+table {
+  width: 100%;
+  border-collapse: collapse;
+  margin: 10px 0;
+  font-size: 10pt;
+  page-break-inside: avoid;
+}
+th {
+  background: #0e2f5a;
+  color: white;
+  padding: 8px 10px;
+  text-align: left;
+  font-weight: 600;
+}
+td {
+  padding: 7px 10px;
+  border-bottom: 1px solid #e0e2e5;
+  vertical-align: top;
+}
+tr:nth-child(even) td { background: #f8f9fb; }
+pre {
+  background: #f5f7fa;
+  border: 1px solid #e0e2e5;
+  border-radius: 6px;
+  padding: 12px 14px;
+  font-size: 9.5pt;
+  overflow-x: auto;
+  margin: 8px 0;
+  page-break-inside: avoid;
+}
+code.inline {
+  background: #ebeef2;
+  padding: 2px 5px;
+  border-radius: 3px;
+  font-size: 10pt;
+  color: #0e2f5a;
+}
+li {
+  margin: 3px 0 3px 24px;
+  list-style: disc;
+}
+li.ol {
+  list-style: decimal;
+}
+li.sub {
+  margin-left: 44px;
+  list-style: circle;
+}
+li.sub2 {
+  margin-left: 64px;
+  list-style: square;
+}
+.page-break { page-break-before: always; }
+</style>
+</head>
+<body>
+<h1>ТЕХНИЧЕСКОЕ ЗАДАНИЕ</h1>
+<h2>BI Analytics Dashboard для Bitrix24</h2>
+<h3>Версия 2.0 — Полная доработка</h3>
+
+<p><strong>Заказчик:</strong> Robot Corporation  </p>
+<p><strong>Дата:</strong> 17.03.2026  </p>
+<p><strong>Статус:</strong> В разработку  </p>
+
+<hr>
+
+<h2>1. ОБЩЕЕ ОПИСАНИЕ ПРОЕКТА</h2>
+
+<h3>1.1 Назначение</h3>
+<p>BI Analytics Dashboard — веб-приложение для аналитики продаж, интегрированное с Bitrix24 CRM. Приложение отображает ключевые KPI, воронки продаж, эффективность менеджеров и каналов привлечения в реальном времени.</p>
+
+<h3>1.2 Текущий стек технологий</h3>
+<table><thead><tr><th>Компонент</th><th>Технология</th></tr></thead><tbody><tr><td>Frontend</td><td>HTML5 + Vanilla JS + CSS3</td></tr>
+<tr><td>Backend</td><td>Node.js + Express.js</td></tr>
+<tr><td>API</td><td>Bitrix24 REST API</td></tr>
+<tr><td>Хранилище токенов</td><td>JSON-файл (db.json)</td></tr>
+<tr><td>HTTP-клиент</td><td>Axios</td></tr>
+<tr><td>Деплой</td><td>PM2 + Rsync на VPS</td></tr>
+<tr><td>Шрифт</td><td>Inter (Google Fonts)</td></tr></tbody></table>
+<h3>1.3 URL и инфраструктура</h3>
+<li><strong>Продакшен:</strong> <code class="inline">https://robots-bi.navrotsky.ru</code></li>
+<li><strong>VPS:</strong> <code class="inline">79.174.77.28</code>, порт <code class="inline">3010</code></li>
+<li><strong>Bitrix24 портал:</strong> <code class="inline">robotcorporation.bitrix24.ru</code></li>
+
+<hr>
+
+<h2>2. ТЕКУЩИЙ ФУНКЦИОНАЛ (Что есть)</h2>
+
+<h3>2.1 Боковая панель (Sidebar)</h3>
+<li>Логотип "BI Analytics" с SVG-иконкой</li>
+<li>Навигация: Дашборд, Аналитика, Менеджеры, Обращения, Настройки</li>
+<li>Профиль пользователя в footer</li>
+<li>Автоскрытие в Bitrix24 iframe-режиме (класс <code class="inline">bitrix-mode</code>)</li>
+
+<h3>2.2 Шапка (Header)</h3>
+<li>Заголовок "Аналитический дашборд"</li>
+<li>Фильтр по периоду: День / Неделя / Месяц (кнопки)</li>
+<li>Отображение текущего диапазона дат</li>
+<li>Кнопка обновления данных</li>
+
+<h3>2.3 KPI-карточки (4 шт.)</h3>
+<table><thead><tr><th>Карточка</th><th>Данные</th><th>Визуализация</th></tr></thead><tbody><tr><td>Выручка</td><td>Сумма выигранных сделок (₽)</td><td>Sparkline-график</td></tr>
+<tr><td>Новые лиды</td><td>Количество лидов</td><td>Sparkline-график</td></tr>
+<tr><td>Конверсия</td><td>% выигранных от общего числа сделок</td><td>Progress Ring (SVG)</td></tr>
+<tr><td>Сделки в работе</td><td>Количество активных сделок</td><td>Точечные индикаторы (горячие/в процессе/стагнирующие)</td></tr></tbody></table>
+<p><strong>Особенности:</strong></p>
+<li>Hover-эффект с поднятием карточки (<code class="inline">translateY(-4px)</code>)</li>
+<li>Градиентная полоска сверху при наведении</li>
+<li>Анимация изменения значений (отключена для сохранения данных API)</li>
+<li>Показатели изменения: <code class="inline">+18.2% к прошлой неделе</code></li>
+
+<h3>2.4 Воронка продаж</h3>
+<li>Горизонтальные полосы с градиентной заливкой</li>
+<li>4 этапа: Новые обращения → Квалифицированные → Переговоры → Успешные сделки</li>
+<li>Коннекторы между этапами с процентом конверсии</li>
+<li><strong>Выбор воронки</strong> через <code class="inline"><select></code> — динамическая загрузка воронок из Bitrix24 (<code class="inline">crm.dealcategory.list</code>)</li>
+<li>Анимация появления полос (<code class="inline">scaleX(0) → scaleX(1)</code>)</li>
+
+<h3>2.5 Источники обращений</h3>
+<li>Donut-диаграмма (SVG, <code class="inline">stroke-dasharray</code>)</li>
+<li>Легенда с прогресс-барами по каждому источнику</li>
+<li>Табы: Принятые / Непринятые</li>
+<li>Блок статистики непринятых заявок</li>
+<li>Динамическая гидрация из <code class="inline">crm.status.list</code> (SOURCE)</li>
+
+<h3>2.6 Эффективность менеджеров</h3>
+<li>Ранжированный список (Top-5)</li>
+<li>Аватар (инициалы), имя, количество сделок</li>
+<li>Горизонтальный прогресс-бар по конверсии</li>
+<li>Общая выручка менеджера</li>
+<li>Медали: 🥇🥈🥉 для топ-3</li>
+<li>Сортировка: по конверсии / по выручке / по сделкам</li>
+
+<h3>2.7 Таблица сделок в работе</h3>
+<li>Колонки: Сделка, Клиент, Менеджер, Этап, Сумма, В работе</li>
+<li>Цветовая индикация длительности: < 7 дн. (зелёный) / 7-14 дн. (синий) / 14-30 дн. (жёлтый) / > 30 дн. (красный)</li>
+<li>Summary-блок: Всего сделок, Общая сумма, Средний срок</li>
+<li>Легенда длительностей</li>
+
+<h3>2.8 Эффективность каналов</h3>
+<li>Горизонтальные бары с цветовыми иконками</li>
+<li>Каналы: Органический трафик, Контекстная реклама, Соцсети, Email, Партнёры</li>
+<li>Переключатель метрик: Конверсия / Лиды</li>
+<li>Динамическая генерация из данных API</li>
+
+<h3>2.9 Серверная часть (Backend)</h3>
+
+<h4>API-эндпоинты:</h4>
+<table><thead><tr><th>Метод</th><th>URL</th><th>Описание</th></tr></thead><tbody><tr><td>GET</td><td><code class="inline">/</code></td><td>Отдача index.html</td></tr>
+<tr><td>POST</td><td><code class="inline">/</code></td><td>Отдача index.html (Bitrix24 POST)</td></tr>
+<tr><td>POST</td><td><code class="inline">/api/bitrix24/install</code></td><td>OAuth Install Handler</td></tr>
+<tr><td>GET</td><td><code class="inline">/api/stats/dashboard</code></td><td>Главный эндпоинт дашборда</td></tr>
+<tr><td>GET</td><td><code class="inline">/api/funnels</code></td><td>Список воронок</td></tr>
+<tr><td>GET</td><td><code class="inline">/api/health</code></td><td>Health check</td></tr></tbody></table>
+<h4>Параметры <code class="inline">/api/stats/dashboard</code>:</h4>
+<li><code class="inline">dateFrom</code> — дата начала периода</li>
+<li><code class="inline">dateTo</code> — дата конца периода</li>
+<li><code class="inline">domain</code> — домен Bitrix24 портала</li>
+<li><code class="inline">categoryId</code> — ID воронки (необязательно, <code class="inline">all</code> = все)</li>
+
+<h4>Bitrix24 API вызовы (параллельные):</h4>
+<li class="ol"><code class="inline">crm.deal.list</code> (STAGE_ID = WON) — выручка</li>
+<li class="ol"><code class="inline">crm.lead.list</code> — лиды и источники</li>
+<li class="ol"><code class="inline">crm.deal.list</code> (!WON, !LOSE) — сделки в работе</li>
+<li class="ol"><code class="inline">crm.deal.list</code> (все) — данные воронки</li>
+<li class="ol"><code class="inline">crm.dealcategory.stage.list</code> — стадии воронки</li>
+<li class="ol"><code class="inline">crm.status.list</code> (SOURCE) — словарь источников</li>
+<li class="ol"><code class="inline">crm.dealcategory.list</code> — категории воронок</li>
+<li class="ol"><code class="inline">user.get</code> — имена менеджеров</li>
+
+<h3>2.10 Авторизация и токены</h3>
+<li>OAuth-установка через POST <code class="inline">/api/bitrix24/install</code></li>
+<li>Хранение токенов в <code class="inline">db.json</code> (файловая БД)</li>
+<li>Автоматический refresh токена при <code class="inline">expired_token</code></li>
+<li>Fallback-цепочка определения домена: <code class="inline">req.query</code> → <code class="inline">storage</code> → <code class="inline">.env</code> → hardcode</li>
+
+<h3>2.11 Mock-данные</h3>
+<li>Модуль <code class="inline">mock-data.js</code> для локальной разработки без Bitrix24</li>
+<li>Генерация реалистичных данных: воронки по категориям, менеджеры, сделки</li>
+
+<hr>
+
+<h2>3. ДОРАБОТКИ СУЩЕСТВУЮЩЕГО ФУНКЦИОНАЛА</h2>
+
+<h3>3.1 Навигация по страницам</h3>
+<p><strong>Текущее состояние:</strong> Пункты меню (Аналитика, Менеджеры, Обращения, Настройки) не работают — только переключают <code class="inline">active</code> класс.</p>
+
+<p><strong>Требования:</strong></p>
+<li>Реализовать полноценную навигацию (SPA-роутинг или секции с переключением видимости)</li>
+<li>Каждый пункт меню должен отображать соответствующий контент</li>
+
+<h4>3.1.1 Страница «Аналитика»</h4>
+<li>Графики динамики за период (линейные/столбиковые)</li>
+<li>Сравнение периодов (текущий vs предыдущий)</li>
+<li>Тренд-анализ: выручка, лиды, конверсия за месяцы</li>
+<li>Экспорт данных в CSV/Excel</li>
+
+<h4>3.1.2 Страница «Менеджеры»</h4>
+<li>Детальная карточка каждого менеджера</li>
+<li>Персональная воронка менеджера</li>
+<li>История сделок менеджера</li>
+<li>KPI-цели и факт/план</li>
+<li>Сравнительный анализ менеджеров</li>
+
+<h4>3.1.3 Страница «Обращения»</h4>
+<li>Лента обращений (лидов) в реальном времени</li>
+<li>Фильтрация по источнику, статусу, менеджеру</li>
+<li>Быстрый просмотр карточки лида</li>
+<li>Статистика по обработке обращений</li>
+
+<h4>3.1.4 Страница «Настройки»</h4>
+<li>Настройки подключения к Bitrix24 (домен, перевыпуск токена)</li>
+<li>Настройки виджетов дашборда (показать/скрыть карточки)</li>
+<li>Управление KPI-целями (план выручки, план лидов)</li>
+<li>Конфигурация уведомлений</li>
+
+<h3>3.2 Адаптивность и отзывчивый дизайн</h3>
+<p><strong>Текущее состояние:</strong> CSS содержит медиа-запросы, но не все компоненты адаптивны.</p>
+
+<p><strong>Требования:</strong></p>
+<li><strong>Мобильная версия</strong> (< 768px): сайдбар → гамбургер-меню, KPI-карточки в 1 колонку, таблица с горизонтальным скроллом</li>
+<li><strong>Планшет</strong> (768–1024px): KPI 2×2, графики в 1 колонку</li>
+<li><strong>Desktop</strong> (> 1024px): текущий layout</li>
+<li>Корректная работа в Bitrix24 iframe на мобильных устройствах</li>
+
+<h3>3.3 Фильтрация и выбор дат</h3>
+<p><strong>Текущее состояние:</strong> Только предустановленные периоды (день/неделя/месяц).</p>
+
+<p><strong>Требования:</strong></p>
+<li>Добавить календарь выбора произвольного диапазона дат (date range picker)</li>
+<li>Быстрые пресеты: «Вчера», «Этот квартал», «Прошлый квартал», «Этот год»</li>
+<li>Сравнение с предыдущим аналогичным периодом</li>
+
+<h3>3.4 Обработка ошибок и состояний загрузки</h3>
+<p><strong>Текущее состояние:</strong> Минимальная обработка ошибок, нет индикаторов загрузки.</p>
+
+<p><strong>Требования:</strong></p>
+<li>Скелетоны (skeleton loaders) при загрузке данных</li>
+<li>Пустые состояния (empty states) с иконками и подписями</li>
+<li>Тосты/уведомления при ошибках API</li>
+<li>Отображение статуса подключения к Bitrix24</li>
+<li>Retry-логика при сбоях сети</li>
+
+<h3>3.5 Реальные данные в KPI-изменениях</h3>
+<p><strong>Текущее состояние:</strong> Проценты изменений (<code class="inline">+18.2%</code>) захардкожены в HTML.</p>
+
+<p><strong>Требования:</strong></p>
+<li>Рассчитывать изменения на бэкенде: текущий период vs предыдущий</li>
+<li>Динамически отображать стрелку вверх/вниз и цвет (зелёный/красный)</li>
+<li>Формат: <code class="inline">+12.5% к прошлой неделе</code> / <code class="inline">-3.1% к прошлому месяцу</code></li>
+
+<h3>3.6 Сортировка менеджеров</h3>
+<p><strong>Текущее состояние:</strong> <code class="inline"><select></code> для сортировки есть, но не работает.</p>
+
+<p><strong>Требования:</strong></p>
+<li>Рабочая сортировка: по конверсии, по выручке, по количеству сделок</li>
+<li>Анимация перестановки элементов при смене сортировки</li>
+
+<h3>3.7 Табы «Принятые/Непринятые»</h3>
+<p><strong>Текущее состояние:</strong> Табы переключают <code class="inline">active</code> класс, но не фильтруют данные.</p>
+
+<p><strong>Требования:</strong></p>
+<li>Таб «Принятые» — отображать источники принятых лидов</li>
+<li>Таб «Непринятые» — отображать источники непринятых/проваленных лидов</li>
+<li>Фильтрация на бэкенде по <code class="inline">STATUS_ID</code> лида</li>
+
+<h3>3.8 Кнопка обновления</h3>
+<p><strong>Текущее состояние:</strong> Анимация вращения + визуальный эффект, но не перезагружает данные с API.</p>
+
+<p><strong>Требования:</strong></p>
+<li>При нажатии — полная пересборка данных с Bitrix24 API</li>
+<li>Индикатор загрузки на время запроса</li>
+<li>Cooldown 5 секунд для предотвращения спама</li>
+
+<h3>3.9 Пагинация в таблице сделок</h3>
+<p><strong>Текущее состояние:</strong> Отображается только 10 сделок (slice(0, 10) на бэкенде).</p>
+
+<p><strong>Требования:</strong></p>
+<li>Пагинация: 10 / 25 / 50 записей на страницу</li>
+<li>Кнопки навигации по страницам</li>
+<li>Сортировка по колонкам (сумма, дни в работе, дата)</li>
+<li>Поиск по названию сделки</li>
+
+<h3>3.10 Кликабельные элементы → Bitrix24</h3>
+<p><strong>Требования:</strong></p>
+<li>Клик по сделке → открытие карточки сделки в Bitrix24 (<code class="inline">BX24.openApplication</code> или deep link)</li>
+<li>Клик по менеджеру → профиль пользователя в Bitrix24</li>
+<li>Клик по лиду → карточка лида</li>
+
+<hr>
+
+<h2>4. НОВЫЙ ФУНКЦИОНАЛ</h2>
+
+<h3>4.1 📚 База знаний (Knowledge Base)</h3>
+
+<h4>4.1.1 Описание</h4>
+<p>Встроенная база знаний для пользователей дашборда. Доступна из бокового меню (новый пункт навигации с иконкой книги).</p>
+
+<h4>4.1.2 Структура</h4>
+<pre><code>📚 База знаний
+<p>├── 📖 Начало работы</p>
+<p>│   ├── Как подключить Bitrix24</p>
+<p>│   ├── Первоначальная настройка</p>
+<p>│   └── Системные требования</p>
+<p>├── 📊 Дашборд</p>
+<p>│   ├── Как читать KPI-карточки</p>
+<p>│   ├── Что такое воронка продаж</p>
+<p>│   ├── Как работает конверсия</p>
+<p>│   └── Фильтрация по периодам</p>
+<p>├── 👥 Менеджеры</p>
+<p>│   ├── Рейтинг эффективности</p>
+<p>│   ├── Как рассчитывается конверсия менеджера</p>
+<p>│   └── Планирование KPI</p>
+<p>├── 📈 Аналитика</p>
+<p>│   ├── Источники обращений</p>
+<p>│   ├── Эффективность каналов</p>
+<p>│   └── Анализ трендов</p>
+<p>├── ⚙️ Администрирование</p>
+<p>│   ├── Управление доступом</p>
+<p>│   ├── Настройка воронок</p>
+<p>│   └── Решение проблем</p>
+<p>└── ❓ FAQ</p>
+<p>    ├── Частые вопросы</p>
+<p>    └── Глоссарий терминов</p>
+<p></code></pre></p>
+
+<h4>4.1.3 UI/UX база знаний</h4>
+<li>Полноэкранная страница с деревом навигации слева</li>
+<li>Поиск по статьям (полнотекстовый поиск по заголовкам и содержимому)</li>
+<li>Статьи в формате Markdown с подсветкой синтаксиса</li>
+<li>Хлебные крошки (breadcrumbs) для навигации</li>
+<li>Кнопка «Была ли полезна статья?» (thumbs up/down)</li>
+<li>Иконки-эмодзи для категорий</li>
+<li>Контекстные ссылки на базу знаний из соответствующих виджетов дашборда</li>
+
+<h4>4.1.4 Техническая реализация</h4>
+<li>Статьи хранятся в JSON-файле или папке Markdown-файлов на сервере</li>
+<li>API-эндпоинт <code class="inline">GET /api/knowledge</code> — список категорий и статей</li>
+<li>API-эндпоинт <code class="inline">GET /api/knowledge/:articleId</code> — содержимое статьи</li>
+<li>API-эндпоинт <code class="inline">GET /api/knowledge/search?q=...</code> — поиск по статьям</li>
+<li>Рендеринг Markdown → HTML на фронтенде (библиотека <code class="inline">marked</code> или аналог)</li>
+<li>Кеширование статей в localStorage для оффлайн-доступа</li>
+
+<hr>
+
+<h3>4.2 🎓 Интерактивный онбординг (Interactive Onboarding)</h3>
+
+<h4>4.2.1 Описание</h4>
+<p>Пошаговый интерактивный тур по дашборду для новых пользователей. Запускается автоматически при первом посещении и доступен для повторного запуска из меню.</p>
+
+<h4>4.2.2 Сценарий онбординга (шаги)</h4>
+
+<table><thead><tr><th>Шаг</th><th>Элемент</th><th>Подсказка</th></tr></thead><tbody><tr><td>1</td><td>Весь экран</td><td>«Добро пожаловать в BI Analytics! Давайте познакомимся с основными возможностями дашборда.»</td></tr>
+<tr><td>2</td><td>KPI-карточки</td><td>«Здесь отображаются ключевые метрики: выручка, количество лидов, конверсия и активные сделки. Данные обновляются в реальном времени.»</td></tr>
+<tr><td>3</td><td>Фильтр периода</td><td>«Переключайте период для анализа: день, неделя или месяц. Данные автоматически пересчитаются.»</td></tr>
+<tr><td>4</td><td>Воронка продаж</td><td>«Воронка показывает, сколько сделок находится на каждом этапе. Выберите конкретную воронку или смотрите все сразу.»</td></tr>
+<tr><td>5</td><td>Выбор воронки (select)</td><td>«Здесь можно выбрать конкретную воронку продаж из вашего Битрикс24.»</td></tr>
+<tr><td>6</td><td>Источники обращений</td><td>«Кольцевая диаграмма показывает распределение лидов по каналам привлечения.»</td></tr>
+<tr><td>7</td><td>Эффективность менеджеров</td><td>«Рейтинг менеджеров по ключевым показателям. Сортируйте по конверсии, выручке или количеству сделок.»</td></tr>
+<tr><td>8</td><td>Таблица сделок</td><td>«Детальная таблица активных сделок с цветовой индикацией сроков. Красный = сделка "зависла".»</td></tr>
+<tr><td>9</td><td>Каналы</td><td>«Сравнивайте эффективность маркетинговых каналов по конверсии или количеству лидов.»</td></tr>
+<tr><td>10</td><td>Кнопка обновления</td><td>«Нажмите, чтобы обновить все данные с Bitrix24.»</td></tr>
+<tr><td>11</td><td>Боковое меню</td><td>«Используйте навигацию для переключения между разделами.»</td></tr>
+<tr><td>12</td><td>Завершение</td><td>«Готово! Теперь вы знаете основы. Нажмите ❓ на любом виджете для получения подсказки.»</td></tr></tbody></table>
+<h4>4.2.3 UI/UX онбординга</h4>
+<li><strong>Overlay</strong> — затемнённый фон с перфорацией (spotlight) вокруг целевого элемента</li>
+<li><strong>Tooltip-облачко</strong> — появляется рядом с элементом (сверху/снизу/сбоку, автопозиционирование)</li>
+<li><strong>Кнопки навигации:</strong> «Назад», «Далее», «Пропустить тур», индикатор прогресса (шаг X из Y)</li>
+<li><strong>Анимация перехода</strong> — плавное перемещение spotlight между элементами (300ms)</li>
+<li><strong>Пульсирующая точка</strong> — на целевом элементе для привлечения внимания</li>
+<li><strong>Прогресс-бар</strong> — визуальный индикатор прохождения тура в верхней части подсказки</li>
+
+<h4>4.2.4 Техническая реализация</h4>
+<li>Собственная реализация без внешних библиотек (чистый JS + CSS)</li>
+<li>Хранение статуса прохождения: <code class="inline">localStorage.setItem('onboarding_completed', 'true')</code></li>
+<li>CSS: <code class="inline">.onboarding-overlay</code>, <code class="inline">.onboarding-spotlight</code>, <code class="inline">.onboarding-tooltip</code></li>
+<li>Автоматический скролл к целевому элементу при переходе между шагами</li>
+<li>Адаптация под Bitrix24 iframe-режим (пропуск шагов, связанных с sidebar)</li>
+<li>Повторный запуск: кнопка «Пройти обучение» в разделе «Настройки» или по <code class="inline">?tour=true</code> в URL</li>
+
+<h4>4.2.5 Условия запуска</h4>
+<li><strong>Автозапуск:</strong> если <code class="inline">localStorage</code> не содержит <code class="inline">onboarding_completed</code></li>
+<li><strong>Ручной запуск:</strong> пункт меню «Настройки → Пройти обучение заново»</li>
+<li><strong>Пропуск в iframe:</strong> если <code class="inline">bitrix-mode</code>, скрывать шаги, связанные с sidebar</li>
+<li><strong>Задержка старта:</strong> 1.5 секунды после загрузки данных, чтобы дашборд успел отрисоваться</li>
+
+<hr>
+
+<h3>4.3 ❓ Иконки-подсказки на каждом виджете (Help Tooltips)</h3>
+
+<h4>4.3.1 Описание</h4>
+<p>На каждом виджете (карточке, графике, таблице) в правом верхнем углу заголовка размещается иконка <code class="inline">❓</code> в кружке. При нажатии — всплывающее окно с пояснением к данному виджету.</p>
+
+<h4>4.3.2 Список виджетов и тексты подсказок</h4>
+
+<table><thead><tr><th>Виджет</th><th>Текст подсказки</th></tr></thead><tbody><tr><td>KPI «Выручка»</td><td>«Сумма всех успешно закрытых сделок (стадия "Выиграна") за выбранный период. Валюта: ₽. Процент изменения рассчитан относительно аналогичного предыдущего периода.»</td></tr>
+<tr><td>KPI «Новые лиды»</td><td>«Количество лидов, созданных в CRM за выбранный период. Лид — первичное обращение потенциального клиента.»</td></tr>
+<tr><td>KPI «Конверсия»</td><td>«Процент сделок со статусом "Выиграна" от общего числа сделок за период. Формула: (выигранные / все сделки) × 100%.»</td></tr>
+<tr><td>KPI «Сделки в работе»</td><td>«Количество активных сделок (не закрытых и не проигранных). Цветовая индикация: 🔴 горячие (близки к закрытию), 🟡 в процессе, ⚪ стагнирующие (без активности).»</td></tr>
+<tr><td>Воронка продаж</td><td>«Визуализация распределения сделок по этапам выбранной воронки. Ширина полосы пропорциональна количеству сделок на этапе. Проценты между этапами показывают конверсию перехода.»</td></tr>
+<tr><td>Источники обращений</td><td>«Распределение лидов по каналам привлечения. Данные берутся из поля "Источник" в карточке лида CRM. Переключайте табы для просмотра принятых и непринятых обращений.»</td></tr>
+<tr><td>Эффективность менеджеров</td><td>«Рейтинг менеджеров отдела продаж. По умолчанию сортировка по конверсии. Выручка менеджера = сумма его выигранных сделок за период.»</td></tr>
+<tr><td>Таблица сделок</td><td>«Список активных сделок с указанием менеджера, этапа и длительности нахождения в работе. Цветная метка срока: зелёный (< 7 дн.), синий (7-14), жёлтый (14-30), красный (> 30).»</td></tr>
+<tr><td>Эффективность каналов</td><td>«Сравнительный анализ маркетинговых каналов. "Конверсия" — процент лидов, ставших сделками. "Лиды" — абсолютное число обращений из канала.»</td></tr></tbody></table>
+<h4>4.3.3 UI/UX подсказок</h4>
+<li><strong>Иконка:</strong> круглая кнопка 24×24px с символом <code class="inline">?</code>, цвет <code class="inline">var(--text-tertiary)</code>, при наведении — <code class="inline">var(--accent-primary)</code></li>
+<li><strong>Расположение:</strong> в <code class="inline">chart-header</code> каждого виджета, справа от заголовка (после <code class="inline"><h3></code>)</li>
+<li><strong>Всплывающее окно (popover):</strong></li>
+<li class="sub">Максимальная ширина: 320px</li>
+<li class="sub">Фон: <code class="inline">var(--bg-card)</code> с тенью <code class="inline">var(--shadow-lg)</code></li>
+<li class="sub">Скруглённые углы: <code class="inline">var(--radius-lg)</code></li>
+<li class="sub">Заголовок виджета жирным шрифтом</li>
+<li class="sub">Текст подсказки обычным шрифтом</li>
+<li class="sub">«Стрелка» (треугольник) указывающая на иконку</li>
+<li class="sub">Кнопка закрытия (×) в правом верхнем углу</li>
+<li class="sub">Ссылка «Подробнее в базе знаний →» ведущая на соответствующую статью</li>
+<li><strong>Поведение:</strong></li>
+<li class="sub">Клик по <code class="inline">❓</code> → появление popover с анимацией fadeIn (200ms)</li>
+<li class="sub">Клик вне popover или по <code class="inline">×</code> → закрытие с fadeOut</li>
+<li class="sub">Только один popover открыт одновременно</li>
+<li class="sub">Автопозиционирование: если не хватает места справа — показывать слева</li>
+
+<h4>4.3.4 Техническая реализация</h4>
+<li>Единый компонент <code class="inline">HelpTooltip(targetElement, title, text, knowledgeBaseLink)</code></li>
+<li>CSS-классы: <code class="inline">.help-btn</code>, <code class="inline">.help-popover</code>, <code class="inline">.help-popover-arrow</code>, <code class="inline">.help-popover-close</code></li>
+<li>Данные подсказок хранятся в JS-объекте (словарь <code class="inline">helpTexts</code>)</li>
+<li>Popover создаётся динамически и добавляется в <code class="inline">document.body</code></li>
+<li>Z-index: 500 (ниже модалок, выше контента)</li>
+<li>Для KPI-карточек — иконка в заголовке <code class="inline">.kpi-content</code> после <code class="inline">.kpi-label</code></li>
+
+<hr>
+
+<h2>5. ДИЗАЙН-СИСТЕМА</h2>
+
+<h3>5.1 Цветовая палитра (сохранить)</h3>
+<pre><code>Sidebar:      #0e2f5a (Midnight Blue)
+<p>Accent:       #2fc6f6 (Bitrix24 Sky Blue)</p>
+<p>Success:      #9dcf00 (Green)</p>
+<p>Warning:      #ffa900 (Orange)</p>
+<p>Danger:       #ff5752 (Red)</p>
+<p>Purple:       #ab7fe6</p>
+<p>Text Primary: #333333</p>
+<p>Text Secondary: #535c69</p>
+<p>Background:   #f5f7fa</p>
+<p>Cards:        #ffffff</p>
+<p>Border:       #e0e2e5</p>
+<p></code></pre></p>
+
+<h3>5.2 Типографика</h3>
+<li>Шрифт: Inter (400, 500, 600, 700, 800)</li>
+<li>Базовый размер: 14px</li>
+<li>Заголовок страницы: 1.875rem (800)</li>
+<li>Заголовок виджета: 1.0625rem (700)</li>
+<li>KPI-значение: 1.75rem (800)</li>
+<li>Лейбл: 0.8125rem (500)</li>
+<li>Мелкий текст: 0.75rem (400)</li>
+
+<h3>5.3 Анимации (сохранить и расширить)</h3>
+<li>Fast: 150ms ease</li>
+<li>Normal: 250ms ease</li>
+<li>Slow: 400ms ease</li>
+<li>Hover-подъём карточек: <code class="inline">translateY(-4px)</code></li>
+<li>Появление баров: <code class="inline">scaleX(0) → scaleX(1)</code> с задержкой по индексу</li>
+
+<hr>
+
+<h2>6. ФАЙЛОВАЯ СТРУКТУРА (после доработки)</h2>
+
+<pre><code>robots-corp-bi-dashboard/
+<p>├── index.html               — Главная HTML-страница</p>
+<p>├── styles.css               — Основные стили + дизайн-система</p>
+<p>├── onboarding.css           — [NEW] Стили онбординга</p>
+<p>├── knowledge.css             — [NEW] Стили базы знаний</p>
+<p>├── script.js                — Основная логика дашборда</p>
+<p>├── onboarding.js            — [NEW] Логика интерактивного онбординга</p>
+<p>├── knowledge.js             — [NEW] Логика базы знаний</p>
+<p>├── help-tooltips.js         — [NEW] Компонент подсказок ❓</p>
+<p>├── router.js                — [NEW] SPA-маршрутизация</p>
+<p>├── server.js                — Express-сервер</p>
+<p>├── bitrix-client.js         — Bitrix24 REST API клиент</p>
+<p>├── storage.js               — Файловая БД для токенов</p>
+<p>├── mock-data.js             — Mock-данные для разработки</p>
+<p>├── knowledge/               — [NEW] Папка статей базы знаний</p>
+<p>│   ├── index.json           — Каталог статей</p>
+<p>│   ├── getting-started.md   — Начало работы</p>
+<p>│   ├── kpi-cards.md         — Описание KPI</p>
+<p>│   ├── funnel.md            — Воронка продаж</p>
+<p>│   └── ...</p>
+<p>├── db.json                  — Хранилище токенов</p>
+<p>├── .env                     — Переменные окружения</p>
+<p>├── .gitignore</p>
+<p>├── package.json</p>
+<p>├── ecosystem.config.js      — PM2 конфигурация</p>
+<p>└── deploy.sh                — Скрипт деплоя</p>
+<p></code></pre></p>
+
+<hr>
+
+<h2>7. НЕФУНКЦИОНАЛЬНЫЕ ТРЕБОВАНИЯ</h2>
+
+<h3>7.1 Производительность</h3>
+<li>Время загрузки дашборда: < 3 секунды (с учётом API Bitrix24)</li>
+<li>Все API-запросы Bitrix24 — параллельно (Promise.all)</li>
+<li>Кеширование данных на фронте (5 минут)</li>
+<li>Lazy-loading для страниц «Аналитика», «Обращения»</li>
+
+<h3>7.2 Совместимость</h3>
+<li>Браузеры: Chrome 90+, Firefox 90+, Safari 14+, Edge 90+</li>
+<li>Bitrix24 Cloud iframe (desktop и мобильное приложение)</li>
+<li>Разрешения: от 375px (мобильный) до 4K</li>
+
+<h3>7.3 Безопасность</h3>
+<li>HTTPS обязателен</li>
+<li>Токены не передаются на фронтенд</li>
+<li>CORS: ограничение по домену Bitrix24</li>
+<li>Rate limiting на API-эндпоинты</li>
+<li>Валидация входных параметров (sanitize <code class="inline">domain</code>, <code class="inline">categoryId</code>)</li>
+
+<h3>7.4 Логирование</h3>
+<li>Структурированный лог на бэкенде: <code class="inline">[Module] Message</code></li>
+<li>Логирование всех API-вызовов к Bitrix24</li>
+<li>Логирование ошибок с контекстом (домен, метод, параметры)</li>
+
+<hr>
+
+<h2>8. ПРИОРИТЕТЫ РЕАЛИЗАЦИИ</h2>
+
+<h3>Спринт 1 — Критический (P0)</h3>
+<li class="ol">❓ Иконки-подсказки на всех виджетах</li>
+<li class="ol">🎓 Интерактивный онбординг</li>
+<li class="ol">Исправление кнопки обновления (реальный refresh)</li>
+<li class="ol">Реальные данные в KPI-изменениях (%)</li>
+<li class="ol">Рабочая сортировка менеджеров</li>
+
+<h3>Спринт 2 — Важные доработки (P1)</h3>
+<li class="ol">📚 База знаний (MVP: 10 статей)</li>
+<li class="ol">Скелетоны загрузки</li>
+<li class="ol">Адаптивность (мобильная версия)</li>
+<li class="ol">Работающие табы «Принятые/Непринятые»</li>
+<li class="ol">Date Range Picker</li>
+
+<h3>Спринт 3 — Развитие (P2)</h3>
+<li class="ol">SPA-навигация (страницы Аналитика, Менеджеры, Обращения)</li>
+<li class="ol">Пагинация и поиск по таблице сделок</li>
+<li class="ol">Deep links в Bitrix24 (клик → карточка сделки)</li>
+<li class="ol">Страница «Настройки»</li>
+<li class="ol">Экспорт данных (CSV)</li>
+
+<hr>
+
+<h2>9. КРИТЕРИИ ПРИЁМКИ</h2>
+
+<li class="ol">Все KPI-карточки отображают реальные данные из Bitrix24</li>
+<li class="ol">Проценты изменений рассчитываются динамически</li>
+<li class="ol">Все пункты меню ведут на рабочие страницы</li>
+<li class="ol">Иконки ❓ присутствуют на КАЖДОМ виджете и показывают popover</li>
+<li class="ol">Онбординг запускается автоматически и проходится до конца</li>
+<li class="ol">База знаний содержит минимум 10 статей с поиском</li>
+<li class="ol">Дашборд корректно работает в Bitrix24 iframe</li>
+<li class="ol">Мобильная версия — читаемая и функциональная</li>
+<li class="ol">Время загрузки < 3 секунд</li>
+
+<hr>
+
+<p><em>Документ подготовлен с использованием полного аудита исходного кода проекта.</em>  </p>
+<p><em>Последнее обновление: 17.03.2026</em></p>
+
+</body>
+</html>

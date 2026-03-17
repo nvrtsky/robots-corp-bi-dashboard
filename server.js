@@ -68,7 +68,23 @@ app.post('/api/bitrix24/install', async (req, res) => {
 
 // Helper to get client for request
 const getClient = (req) => {
-    const domain = req.query.domain || req.headers['x-bitrix-domain'];
+    let domain = req.query.domain || req.headers['x-bitrix-domain'];
+
+    // Fallback 1: use first available domain from storage
+    if (!domain) {
+        const tokens = storage.getAll();
+        if (tokens && Object.keys(tokens).length > 0) {
+            domain = Object.keys(tokens)[0];
+            console.log('[API] Using fallback domain from storage:', domain);
+        }
+    }
+
+    // Fallback 2: use DEFAULT_DOMAIN from .env
+    if (!domain && process.env.DEFAULT_DOMAIN) {
+        domain = process.env.DEFAULT_DOMAIN;
+        console.log('[API] Using fallback domain from .env:', domain);
+    }
+
     if (!domain) throw new Error('Domain required');
     return new BitrixClient(domain);
 };
@@ -77,7 +93,7 @@ const getClient = (req) => {
 app.get('/api/stats/dashboard', async (req, res) => {
     try {
         const client = getClient(req);
-        const { dateFrom, dateTo } = req.query;
+        const { dateFrom, dateTo, categoryId } = req.query;
 
         // Date Filter Logic
         const dateFilter = {};
@@ -86,47 +102,88 @@ app.get('/api/stats/dashboard', async (req, res) => {
             if (dateTo) dateFilter['<=DATE_CREATE'] = dateTo;
         }
 
+        // Category Filter (funnel filter)
+        const categoryFilter = {};
+        if (categoryId !== undefined && categoryId !== 'all') {
+            categoryFilter.CATEGORY_ID = categoryId;
+        }
+
+        // Determine which stage list to fetch
+        const stageListId = categoryId !== undefined && categoryId !== 'all' ? parseInt(categoryId) : 0;
+
         // Parallel fetch for efficiency
-        const [dealsWon, leads, dealsInProgress, allDeals, stages] = await Promise.all([
-            // Revenue: Deals WON
+        const [dealsWon, leads, dealsInProgress, allDeals, stages, sourceStatuses, dealCategories] = await Promise.all([
+            // Revenue: Deals WON (filtered by category if specified)
             client.call('crm.deal.list', {
-                filter: { STAGE_ID: 'WON', ...dateFilter },
+                filter: { STAGE_ID: 'WON', ...dateFilter, ...categoryFilter },
                 select: ['OPPORTUNITY', 'CURRENCY_ID', 'ASSIGNED_BY_ID']
             }),
-            // Leads: All Leads
+            // Leads: All Leads (not filtered by category - leads don't have categories)
             client.call('crm.lead.list', {
                 filter: { ...dateFilter },
                 select: ['ID', 'SOURCE_ID']
             }),
-            // Deals In Progress: Not WON and Not LOSE
+            // Deals In Progress: Not WON and Not LOSE (filtered by category)
             client.call('crm.deal.list', {
-                filter: { '!STAGE_ID': ['WON', 'LOSE'], ...dateFilter },
-                select: ['ID', 'TITLE', 'OPPORTUNITY', 'ASSIGNED_BY_ID', 'DATE_CREATE', 'STAGE_ID']
+                filter: { '!STAGE_ID': ['WON', 'LOSE'], ...dateFilter, ...categoryFilter },
+                select: ['ID', 'TITLE', 'OPPORTUNITY', 'ASSIGNED_BY_ID', 'DATE_CREATE', 'STAGE_ID', 'CATEGORY_ID']
             }),
-            // All Deals for funnel (limited to recent)
+            // All Deals for funnel (filtered by category)
             client.call('crm.deal.list', {
-                filter: { ...dateFilter },
-                select: ['ID', 'STAGE_ID', 'ASSIGNED_BY_ID', 'OPPORTUNITY']
+                filter: { ...dateFilter, ...categoryFilter },
+                select: ['ID', 'STAGE_ID', 'ASSIGNED_BY_ID', 'OPPORTUNITY', 'CATEGORY_ID']
             }),
-            // Deal stages for funnel labels
-            client.call('crm.dealcategory.stage.list', { id: 0 })
+            // Deal stages for the selected category
+            client.call('crm.dealcategory.stage.list', { id: stageListId }),
+            // Source names mapping
+            client.call('crm.status.list', { filter: { ENTITY_ID: 'SOURCE' } }),
+            // All deal categories
+            client.call('crm.dealcategory.list')
         ]);
+
+        // Build source names map
+        const sourceNames = {};
+        if (sourceStatuses.result) {
+            sourceStatuses.result.forEach(s => {
+                sourceNames[s.STATUS_ID] = s.NAME;
+            });
+        }
 
         // Calculate Revenue
         const revenue = dealsWon.result.reduce((sum, deal) => sum + parseFloat(deal.OPPORTUNITY || 0), 0);
 
-        // Calculate Sources
+        // Calculate Sources with readable names
         const sources = {};
         leads.result.forEach(lead => {
-            const src = lead.SOURCE_ID || 'OTHER';
-            sources[src] = (sources[src] || 0) + 1;
+            const srcId = lead.SOURCE_ID || 'OTHER';
+            const srcName = sourceNames[srcId] || srcId;
+            sources[srcName] = (sources[srcName] || 0) + 1;
         });
 
-        // Build Funnel Data
+        // Build Funnel Data - fetch stages from all categories
         const stageMap = {};
-        stages.result.forEach(stage => {
-            stageMap[stage.STATUS_ID] = stage.NAME;
-        });
+        // Add default category stages
+        if (stages.result) {
+            stages.result.forEach(stage => {
+                stageMap[stage.STATUS_ID] = stage.NAME;
+            });
+        }
+        // Fetch stages from all other categories
+        if (dealCategories.result && dealCategories.result.length > 0) {
+            const categoryIds = dealCategories.result.map(c => c.ID);
+            for (const catId of categoryIds) {
+                try {
+                    const catStages = await client.call('crm.dealcategory.stage.list', { id: catId });
+                    if (catStages.result) {
+                        catStages.result.forEach(stage => {
+                            stageMap[stage.STATUS_ID] = stage.NAME;
+                        });
+                    }
+                } catch (e) {
+                    console.log(`[API] Could not fetch stages for category ${catId}`);
+                }
+            }
+        }
 
         const funnelData = {};
         allDeals.result.forEach(deal => {
@@ -205,6 +262,37 @@ app.get('/api/stats/dashboard', async (req, res) => {
     } catch (e) {
         console.error('[API Error]', e.message);
         res.status(500).json({ error: e.message, isDemo: true });
+    }
+});
+
+// Get all funnels (deal categories)
+app.get('/api/funnels', async (req, res) => {
+    try {
+        const client = getClient(req);
+
+        // Get all deal categories (funnels)
+        const categories = await client.call('crm.dealcategory.list');
+
+        // Add default category (ID=0, "Общая")
+        const funnels = [
+            { ID: '0', NAME: 'Общая' }
+        ];
+
+        if (categories.result) {
+            categories.result.forEach(cat => {
+                funnels.push({
+                    ID: cat.ID,
+                    NAME: cat.NAME
+                });
+            });
+        }
+
+        console.log('[API] Funnels loaded:', funnels.length);
+        res.json({ funnels });
+
+    } catch (e) {
+        console.error('[API Funnels Error]', e.message);
+        res.status(500).json({ error: e.message });
     }
 });
 
