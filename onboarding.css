@@ -1,0 +1,133 @@
+/* ===================================
+   Onboarding
+   =================================== */
+.onboarding-overlay {
+    position: fixed;
+    inset: 0;
+    z-index: 900;
+    pointer-events: all;
+    transition: clip-path 0.3s ease;
+}
+
+.onboarding-tooltip {
+    position: fixed;
+    width: 320px;
+    background: var(--bg-card);
+    border-radius: var(--radius-lg);
+    box-shadow: 0 8px 32px rgba(0,0,0,0.2);
+    padding: var(--spacing-lg);
+    z-index: 1000;
+    opacity: 0;
+    transform: translateY(8px);
+    transition: opacity 0.25s ease, transform 0.25s ease;
+}
+
+.onboarding-tooltip.visible {
+    opacity: 1;
+    transform: translateY(0);
+}
+
+.onboarding-progress-bar {
+    height: 4px;
+    background: var(--bg-tertiary);
+    border-radius: 2px;
+    margin-bottom: var(--spacing-md);
+    overflow: hidden;
+}
+
+.onboarding-progress-fill {
+    height: 100%;
+    background: linear-gradient(90deg, var(--accent-primary), var(--accent-secondary));
+    border-radius: 2px;
+    transition: width 0.3s ease;
+}
+
+.onboarding-step-counter {
+    font-size: 0.75rem;
+    color: var(--text-tertiary);
+    margin-bottom: var(--spacing-xs);
+}
+
+.onboarding-title {
+    font-size: 1rem;
+    font-weight: 700;
+    margin-bottom: var(--spacing-sm);
+    color: var(--text-primary);
+}
+
+.onboarding-text {
+    font-size: 0.875rem;
+    color: var(--text-secondary);
+    line-height: 1.6;
+    margin-bottom: var(--spacing-lg);
+}
+
+.onboarding-buttons {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+}
+
+.onboarding-skip {
+    background: none;
+    border: none;
+    color: var(--text-tertiary);
+    font-size: 0.75rem;
+    cursor: pointer;
+    padding: 0;
+}
+
+.onboarding-skip:hover {
+    color: var(--text-secondary);
+}
+
+.onboarding-nav {
+    display: flex;
+    gap: var(--spacing-sm);
+}
+
+.onboarding-prev,
+.onboarding-next {
+    padding: var(--spacing-sm) var(--spacing-md);
+    border-radius: var(--radius-md);
+    font-size: 0.8125rem;
+    font-weight: 600;
+    cursor: pointer;
+    border: none;
+    transition: all var(--transition-fast);
+}
+
+.onboarding-prev {
+    background: var(--bg-tertiary);
+    color: var(--text-secondary);
+}
+
+.onboarding-prev:hover {
+    background: var(--border-color);
+}
+
+.onboarding-next {
+    background: linear-gradient(135deg, var(--accent-primary), var(--accent-secondary));
+    color: white;
+}
+
+.onboarding-next:hover {
+    opacity: 0.9;
+}
+
+.onboarding-pulse {
+    position: fixed;
+    width: 16px;
+    height: 16px;
+    border-radius: 50%;
+    background: var(--accent-primary);
+    z-index: 950;
+    pointer-events: none;
+    animation: onboardingPulse 1.5s infinite;
+}
+
+@keyframes onboardingPulse {
+    0% { transform: scale(1); opacity: 1; }
+    50% { transform: scale(1.8); opacity: 0.4; }
+    100% { transform: scale(1); opacity: 1; }
+}

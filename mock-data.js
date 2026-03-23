@@ -150,6 +150,14 @@ function generateDashboardData(categoryId = 'all') {
         };
     });
 
+    // Генерируем случайные % изменений для mock
+    const changes = {
+        revenue: randomFloat(-25, 35, 1),
+        leadsCount: randomFloat(-20, 40, 1),
+        conversionRate: randomFloat(-10, 15, 1),
+        dealsInProgress: randomFloat(-15, 25, 1)
+    };
+
     return {
         revenue,
         leadsCount,
@@ -160,7 +168,8 @@ function generateDashboardData(categoryId = 'all') {
         managers: managers.slice(0, 6),
         conversionRate,
         totalDeals,
-        wonDeals: wonCount
+        wonDeals: wonCount,
+        changes,
     };
 }
 

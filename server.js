@@ -102,6 +102,21 @@ app.get('/api/stats/dashboard', async (req, res) => {
             if (dateTo) dateFilter['<=DATE_CREATE'] = dateTo;
         }
 
+        // Предыдущий период (такой же интервал, сдвинутый назад)
+        const periodDays = dateFrom && dateTo
+            ? Math.ceil((new Date(dateTo) - new Date(dateFrom)) / (1000 * 60 * 60 * 24))
+            : 7;
+
+        const prevDateTo = new Date(dateFrom || dateTo);
+        prevDateTo.setDate(prevDateTo.getDate() - 1);
+        const prevDateFrom = new Date(prevDateTo);
+        prevDateFrom.setDate(prevDateFrom.getDate() - periodDays);
+
+        const prevDateFilter = {
+            '>=DATE_CREATE': prevDateFrom.toISOString().split('T')[0],
+            '<=DATE_CREATE': prevDateTo.toISOString().split('T')[0]
+        };
+
         // Category Filter (funnel filter)
         const categoryFilter = {};
         if (categoryId !== undefined && categoryId !== 'all') {
@@ -112,7 +127,7 @@ app.get('/api/stats/dashboard', async (req, res) => {
         const stageListId = categoryId !== undefined && categoryId !== 'all' ? parseInt(categoryId) : 0;
 
         // Parallel fetch for efficiency
-        const [dealsWon, leads, dealsInProgress, allDeals, stages, sourceStatuses, dealCategories] = await Promise.all([
+        const [dealsWon, leads, dealsInProgress, allDeals, stages, sourceStatuses, dealCategories, prevDealsWon, prevLeads] = await Promise.all([
             // Revenue: Deals WON (filtered by category if specified)
             client.call('crm.deal.list', {
                 filter: { STAGE_ID: 'WON', ...dateFilter, ...categoryFilter },
@@ -138,7 +153,17 @@ app.get('/api/stats/dashboard', async (req, res) => {
             // Source names mapping
             client.call('crm.status.list', { filter: { ENTITY_ID: 'SOURCE' } }),
             // All deal categories
-            client.call('crm.dealcategory.list')
+            client.call('crm.dealcategory.list'),
+            // Предыдущий период: выигранные сделки
+            client.call('crm.deal.list', {
+                filter: { STAGE_ID: 'WON', ...prevDateFilter, ...categoryFilter },
+                select: ['OPPORTUNITY']
+            }),
+            // Предыдущий период: лиды
+            client.call('crm.lead.list', {
+                filter: { ...prevDateFilter },
+                select: ['ID']
+            })
         ]);
 
         // Build source names map
@@ -245,6 +270,22 @@ app.get('/api/stats/dashboard', async (req, res) => {
         const wonDeals = dealsWon.total || dealsWon.result.length;
         const conversionRate = totalDeals > 0 ? ((wonDeals / totalDeals) * 100).toFixed(1) : 0;
 
+        // Расчёт % изменений
+        const prevRevenue = prevDealsWon.result.reduce((sum, d) => sum + parseFloat(d.OPPORTUNITY || 0), 0);
+        const prevLeadsCount = prevLeads.total || prevLeads.result.length;
+        const prevTotalDeals = prevDealsWon.result.length;
+
+        const calcChange = (current, previous) => {
+            if (previous === 0) return null;
+            return parseFloat(((current - previous) / previous * 100).toFixed(1));
+        };
+
+        const changes = {
+            revenue: calcChange(revenue, prevRevenue),
+            leadsCount: calcChange(leads.total || leads.result.length, prevLeadsCount),
+            conversionRate: calcChange(parseFloat(conversionRate), prevTotalDeals > 0 ? parseFloat(((prevDealsWon.result.length / prevTotalDeals) * 100).toFixed(1)) : 0),
+        };
+
         // Response
         res.json({
             revenue,
@@ -256,13 +297,17 @@ app.get('/api/stats/dashboard', async (req, res) => {
             managers: managers.slice(0, 6),
             conversionRate: parseFloat(conversionRate),
             totalDeals,
-            wonDeals
+            wonDeals,
+            changes,
         });
 
     } catch (e) {
-        console.error('[API Error]', e.message);
-        res.status(500).json({ error: e.message, isDemo: true });
-    }
+    console.error('[API Error]', e.message);
+    console.log('[API] Falling back to mock data');
+    const mockData = require('./mock-data');
+    const data = mockData.generateDashboardData(req.query.categoryId);
+    res.json({ ...data, isDemo: true });
+}
 });
 
 // Get all funnels (deal categories)
@@ -292,7 +337,9 @@ app.get('/api/funnels', async (req, res) => {
 
     } catch (e) {
         console.error('[API Funnels Error]', e.message);
-        res.status(500).json({ error: e.message });
+        console.log('[API] Falling back to mock funnels');
+        const mockData = require('./mock-data');
+        res.json(mockData.getFunnels());
     }
 });
 

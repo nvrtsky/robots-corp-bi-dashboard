@@ -1664,3 +1664,77 @@ body.bitrix-mode .app {
 ::-webkit-scrollbar-thumb:hover {
     background: var(--text-tertiary);
 }
+
+/* ===================================
+   Help Tooltips
+   =================================== */
+.help-btn {
+    width: 24px;
+    height: 24px;
+    border-radius: 50%;
+    border: 1.5px solid var(--text-tertiary);
+    background: transparent;
+    color: var(--text-tertiary);
+    font-size: 0.75rem;
+    font-weight: 700;
+    cursor: pointer;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    margin-left: var(--spacing-sm);
+    transition: all var(--transition-fast);
+    flex-shrink: 0;
+}
+
+.help-btn:hover {
+    border-color: var(--accent-primary);
+    color: var(--accent-primary);
+}
+
+.help-popover {
+    position: absolute;
+    width: 320px;
+    background: var(--bg-card);
+    border: 1px solid var(--border-color);
+    border-radius: var(--radius-lg);
+    box-shadow: var(--shadow-lg);
+    padding: var(--spacing-lg);
+    z-index: 500;
+    opacity: 0;
+    transform: translateY(-4px);
+    transition: opacity 0.2s ease, transform 0.2s ease;
+}
+
+.help-popover.visible {
+    opacity: 1;
+    transform: translateY(0);
+}
+
+.help-popover-close {
+    position: absolute;
+    top: 8px;
+    right: 10px;
+    background: none;
+    border: none;
+    font-size: 1.1rem;
+    cursor: pointer;
+    color: var(--text-tertiary);
+    line-height: 1;
+}
+
+.help-popover-close:hover {
+    color: var(--text-primary);
+}
+
+.help-popover-title {
+    font-weight: 700;
+    font-size: 0.9375rem;
+    margin-bottom: var(--spacing-sm);
+    padding-right: var(--spacing-lg);
+}
+
+.help-popover-text {
+    font-size: 0.8125rem;
+    color: var(--text-secondary);
+    line-height: 1.6;
+}

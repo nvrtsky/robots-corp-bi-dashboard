@@ -6,6 +6,8 @@ let bitrixDomain = null;
 let currentPeriod = 'week'; // day, week, month
 let currentCategory = 'all'; // funnel category ID ('all' = all funnels)
 let funnelsList = []; // loaded funnels
+let currentManagers = []; // кэш загруженных менеджеров
+let currentManagerSort = 'revenue'; // текущая сортировка
 
 // Check if running in Bitrix24 context
 function detectBitrixContext() {
@@ -114,6 +116,9 @@ document.addEventListener('DOMContentLoaded', () => {
     initTabs();
     initAnimations();
     initRefreshButton();
+    initManagerSort();
+    initHelpTooltips();
+    checkAutoStart();
 
     // Fetch real data - only if NOT running in Bitrix24 context
     // If BX24 SDK is available, fetchDashboardData will be called from BX24.init callback
@@ -240,6 +245,14 @@ function updateDashboardUI(data) {
         updateKPI('.kpi-card.conversion .kpi-value', data.conversionRate, '', '%');
     }
 
+    // 2. Update KPI changes (%)
+    if (data.changes) {
+        updateKPIChange('.kpi-card.revenue', data.changes.revenue);
+        updateKPIChange('.kpi-card.leads', data.changes.leadsCount);
+        updateKPIChange('.kpi-card.conversion', data.changes.conversionRate);
+        updateKPIChange('.kpi-card.deals', data.changes.dealsInProgress);
+    }
+
     // 2. Update Sources Donut Chart
     if (data.sources) {
         updateDonutChart(data.sources);
@@ -253,7 +266,8 @@ function updateDashboardUI(data) {
 
     // 4. Update Manager Stats
     if (data.managers && data.managers.length > 0) {
-        updateManagersChart(data.managers);
+        currentManagers = data.managers;
+        updateManagersChart(sortManagers(data.managers, currentManagerSort));
     }
 
     // 5. Update Funnel
@@ -270,6 +284,27 @@ function updateKPI(selector, value, prefix = '', suffix = '') {
     } else {
         console.warn('[Dashboard] Element not found:', selector);
     }
+}
+
+function updateKPIChange(cardSelector, changeValue) {
+    const card = document.querySelector(cardSelector);
+    if (!card) return;
+
+    const changeEl = card.querySelector('.kpi-change');
+    if (!changeEl) return;
+
+    if (changeValue === null || changeValue === undefined) {
+        changeEl.textContent = '— нет данных';
+        changeEl.className = 'kpi-change neutral';
+        return;
+    }
+
+    const sign = changeValue >= 0 ? '+' : '';
+    const arrow = changeValue >= 0 ? '↑' : '↓';
+    const cssClass = changeValue >= 0 ? 'positive' : 'negative';
+
+    changeEl.textContent = `${arrow} ${sign}${changeValue}% к прошлому периоду`;
+    changeEl.className = `kpi-change ${cssClass}`;
 }
 
 function updateDonutChart(sources) {
@@ -392,53 +427,91 @@ function updateChannelsChart(sources) {
     }).join('');
 }
 
-// Update Managers Chart
 function updateManagersChart(managers) {
     const container = document.querySelector('.managers-list');
     if (!container) return;
 
     const maxRevenue = Math.max(...managers.map(m => m.revenue));
+    const medals = ['gold', 'silver', 'bronze'];
 
-    container.innerHTML = managers.map(manager => {
+    container.innerHTML = managers.map((manager, idx) => {
         const percent = maxRevenue > 0 ? (manager.revenue / maxRevenue * 100) : 0;
+        const rankClass = medals[idx] || '';
+        const initials = manager.name.split(' ').map(n => n[0]).join('').slice(0, 2);
+
         return `
-        <div class="manager-bar">
+        <div class="manager-item">
+            <div class="manager-rank ${rankClass}">${idx + 1}</div>
+            <div class="manager-avatar">${initials}</div>
             <div class="manager-info">
-                <div class="manager-avatar">${manager.name.charAt(0)}</div>
                 <span class="manager-name">${manager.name}</span>
+                <span class="manager-deals">${manager.deals} сделок</span>
             </div>
-            <div class="bar-container">
-                <div class="bar" style="width: ${percent}%"></div>
-                <span class="bar-value">₽ ${formatNumber(manager.revenue)}</span>
+            <div class="manager-stats">
+                <div class="manager-bar">
+                    <div class="bar-fill" style="width: ${percent}%"></div>
+                </div>
+                <span class="manager-value">₽ ${formatNumber(Math.round(manager.revenue / 1000))}K</span>
             </div>
-        </div>
-    `;
+            <div class="manager-revenue">₽ ${formatNumber(manager.revenue)}</div>
+        </div>`;
     }).join('');
 }
 
-// Update Funnel Chart
 function updateFunnelChart(funnel) {
     const container = document.querySelector('.funnel-container');
     if (!container) return;
 
     const stages = Object.entries(funnel);
     const maxCount = Math.max(...stages.map(([_, count]) => count));
+    const stageClasses = ['stage-1', 'stage-2', 'stage-3', 'stage-4', 'stage-1'];
 
     container.innerHTML = stages.map(([name, count], idx) => {
-        const percent = maxCount > 0 ? (count / maxCount * 100) : 0;
-        const colors = ['#2fc6f6', '#9dcf00', '#ffa900', '#ff5752', '#ab7fe6'];
-        const color = colors[idx % colors.length];
+        const percent = maxCount > 0 ? Math.round(count / maxCount * 100) : 0;
+        const stageClass = stageClasses[idx % stageClasses.length];
+        const connector = idx < stages.length - 1 ? `
+        <div class="funnel-connector">
+            <span class="conversion-rate">→ ${percent}%</span>
+        </div>` : '';
+
         return `
-        <div class="funnel-stage">
-            <div class="stage-label">${name}</div>
-            <div class="stage-bar-container">
-                <div class="stage-bar" style="width: ${percent}%; background: ${color}">
-                    <span class="stage-count">${count}</span>
-                </div>
+        <div class="funnel-stage ${stageClass}">
+            <div class="funnel-bar" style="--width: ${percent}%">
+                <span class="funnel-value">${count}</span>
+            </div>
+            <div class="funnel-info">
+                <span class="stage-name">${name}</span>
+                <span class="stage-percent">${percent}%</span>
             </div>
         </div>
-    `;
+        ${connector}`;
     }).join('');
+}
+
+function sortManagers(managers, sortBy) {
+    return [...managers].sort((a, b) => {
+        if (sortBy === 'revenue') return b.revenue - a.revenue;
+        if (sortBy === 'deals') return b.deals - a.deals;
+        if (sortBy === 'conversion') return (b.revenue / (b.deals || 1)) - (a.revenue / (a.deals || 1));
+        return 0;
+    });
+}
+
+function initManagerSort() {
+    const select = document.querySelector('.chart-select');
+    if (!select) return;
+
+    select.addEventListener('change', (e) => {
+        const map = {
+            'По выручке': 'revenue',
+            'По сделкам': 'deals',
+            'По конверсии': 'conversion'
+        };
+        currentManagerSort = map[e.target.value] || 'revenue';
+        if (currentManagers.length > 0) {
+            updateManagersChart(sortManagers(currentManagers, currentManagerSort));
+        }
+    });
 }
 
 // Period Filter Buttons
@@ -582,22 +655,35 @@ function formatDate(date) {
 // Refresh button functionality
 function initRefreshButton() {
     const refreshBtn = document.querySelector('.refresh-btn');
-    if (refreshBtn) {
-        refreshBtn.addEventListener('click', () => {
-            // Spin animation
-            const svg = refreshBtn.querySelector('svg');
-            svg.style.transition = 'transform 0.5s ease';
-            svg.style.transform = 'rotate(360deg)';
+    if (!refreshBtn) return;
 
-            setTimeout(() => {
-                svg.style.transition = 'none';
-                svg.style.transform = 'rotate(0deg)';
-            }, 500);
+    let cooldown = false;
 
-            // Simulate data refresh
-            animateDataRefresh();
-        });
-    }
+    refreshBtn.addEventListener('click', async () => {
+        if (cooldown) return; // блокируем повторный клик
+
+        // Запускаем анимацию вращения
+        cooldown = true;
+        refreshBtn.disabled = true;
+        const svg = refreshBtn.querySelector('svg');
+        svg.style.transition = 'transform 0.8s linear';
+        svg.style.transform = 'rotate(360deg)';
+
+        // Реальный запрос данных
+        await fetchDashboardData();
+
+        // Сброс анимации
+        setTimeout(() => {
+            svg.style.transition = 'none';
+            svg.style.transform = 'rotate(0deg)';
+        }, 800);
+
+        // Cooldown 5 секунд
+        setTimeout(() => {
+            cooldown = false;
+            refreshBtn.disabled = false;
+        }, 5000);
+    });
 }
 
 // Data refresh animation
