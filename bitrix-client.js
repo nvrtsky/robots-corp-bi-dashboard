@@ -28,7 +28,7 @@ class BitrixClient {
                 if (response.data.error === 'expired_token' || response.data.error === 'NO_AUTH_FOUND') {
                     console.log(`[Bitrix API] Token expired for ${this.domain}, refreshing...`);
                     await this.refreshToken(tokens);
-                    // Retry original request
+                    await new Promise(resolve => setTimeout(resolve, 500));
                     return this.call(method, params);
                 }
                 throw new Error(`Bitrix API Error: ${response.data.error_description || response.data.error}`);
@@ -40,6 +40,8 @@ class BitrixClient {
             if (error.response && error.response.data && (error.response.data.error === 'expired_token' || error.response.data.error === 'NO_AUTH_FOUND')) {
                 console.log(`[Bitrix API] Token expired (401) for ${this.domain}, refreshing...`);
                 await this.refreshToken(tokens);
+                // Небольшая пауза чтобы токен успел сохраниться
+                await new Promise(resolve => setTimeout(resolve, 500));
                 return this.call(method, params);
             }
             throw error;
