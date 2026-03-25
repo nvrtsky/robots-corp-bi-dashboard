@@ -97,8 +97,8 @@
                 <div class="header-right">
                     <div class="date-filter">
                         <button class="filter-btn" data-period="day">День</button>
-                        <button class="filter-btn active" data-period="week">Неделя</button>
-                        <button class="filter-btn" data-period="month">Месяц</button>
+                        <button class="filter-btn" data-period="week">Неделя</button>
+                        <button class="filter-btn active" data-period="month">Месяц</button>
                     </div>
                     <div class="date-range">
                         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
@@ -416,11 +416,18 @@
                 <div class="chart-card managers-card">
                     <div class="chart-header">
                         <h3>Эффективность менеджеров</h3>
-                        <select class="chart-select">
+                        <div style="display:flex;gap:8px;align-items:center;">
+                            <div class="date-filter" style="margin:0;">
+                                <button class="mgr-filter-btn" data-period="day">День</button>
+                                <button class="mgr-filter-btn" data-period="week">Неделя</button>
+                                <button class="mgr-filter-btn active" data-period="month">Месяц</button>
+                            </div>
+                            <select class="chart-select">
                             <option>По конверсии</option>
                             <option>По выручке</option>
                             <option>По сделкам</option>
-                        </select>
+                            </select>
+                        </div>
                     </div>
                     <div class="managers-list">
                         <div class="manager-item">

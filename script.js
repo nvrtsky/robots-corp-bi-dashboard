@@ -5,7 +5,7 @@ let currentDeals = []; // кэш сделок
 let currentDealFilter = 'all'; // текущий фильтр
 let isInBitrix = false;
 let bitrixDomain = null;
-let currentPeriod = 'week'; // day, week, month
+let currentPeriod = 'month'; // day, week, month
 let currentCategory = 'all'; // funnel category ID ('all' = all funnels)
 let funnelsList = []; // loaded funnels
 let currentManagers = []; // кэш загруженных менеджеров
@@ -112,6 +112,19 @@ function setupAutoResize() {
 }
 
 document.addEventListener('DOMContentLoaded', () => {
+    // Показать скелетоны до загрузки данных
+    document.querySelectorAll('.mgr-filter-btn').forEach(btn => {
+        btn.addEventListener('click', () => {
+            document.querySelectorAll('.mgr-filter-btn').forEach(b => b.classList.remove('active'));
+            btn.classList.add('active');
+            const period = btn.dataset.period;
+            if (period) fetchDashboardData(period);
+        });
+    });
+    document.querySelectorAll('.manager-item').forEach(el => {
+        el.style.opacity = '0.3';
+        el.style.pointerEvents = 'none';
+    });
     // Initialize Bitrix24 integration
     initBitrix24();
 
@@ -259,6 +272,7 @@ function updateDashboardUI(data) {
 
     // 2. Update Sources Donut Chart
     if (data.sources) {
+        window._lastSources = data.sources;
         updateDonutChart(data.sources);
         updateChannelsChart(data.sources); // Update channels section too
     }
@@ -309,6 +323,7 @@ function updateKPI(selector, value, prefix = '', suffix = '') {
     const el = document.querySelector(selector);
     console.log('[Dashboard] updateKPI:', selector, '-> element:', el, '| value:', value);
     if (el) {
+        el.classList.remove('skeleton');
         el.textContent = prefix + formatNumber(value) + suffix;
     } else {
         console.warn('[Dashboard] Element not found:', selector);
@@ -323,6 +338,7 @@ function updateKPIChange(cardSelector, changeValue) {
     if (!changeEl) return;
 
     if (changeValue === null || changeValue === undefined) {
+        changeEl.classList.remove('skeleton');
         changeEl.textContent = '— нет данных';
         changeEl.className = 'kpi-change neutral';
         return;
@@ -416,6 +432,17 @@ function updateDealsTable(deals) {
         `;
         summary.parentNode.insertBefore(pagination, summary);
     }
+
+    // Обновить summary
+    const summaryItems = document.querySelectorAll('.deals-summary .summary-value');
+    if (summaryItems.length >= 3) {
+        const allDeals = currentDeals;
+        const totalSum = allDeals.reduce((s, d) => s + parseFloat(d.OPPORTUNITY || 0), 0);
+        const avgDays = allDeals.length > 0 ? Math.round(allDeals.reduce((s, d) => s + (d.daysInProgress || 0), 0) / allDeals.length) : 0;
+        summaryItems[0].textContent = allDeals.length;
+        summaryItems[1].textContent = '₽ ' + formatNumber(Math.round(totalSum / 1000000 * 10) / 10) + 'M';
+        summaryItems[2].textContent = avgDays;
+    }
 }
 
 function changePage(dir) {
@@ -475,43 +502,87 @@ function updateChannelsChart(sources) {
     }).join('');
 }
 
+let dashManagerPage = 1;
+const dashManagersPerPage = 5;
+
 function updateManagersChart(managers) {
+    document.querySelectorAll('.manager-item').forEach(el => {
+        el.style.opacity = '';
+        el.style.pointerEvents = '';
+    });
+
     const container = document.querySelector('.managers-list');
     if (!container) return;
 
     const maxRevenue = Math.max(...managers.map(m => m.revenue));
     const medals = ['gold', 'silver', 'bronze'];
+    const totalPages = Math.ceil(managers.length / dashManagersPerPage);
+    const start = (dashManagerPage - 1) * dashManagersPerPage;
+    const paginated = managers.slice(start, start + dashManagersPerPage);
 
-    container.innerHTML = managers.map((manager, idx) => {
+    container.innerHTML = paginated.map((manager, idx) => {
+        const globalIdx = start + idx;
         const percent = maxRevenue > 0 ? (manager.revenue / maxRevenue * 100) : 0;
-        const rankClass = medals[idx] || '';
+        const rankClass = medals[globalIdx] || '';
         const initials = manager.name.split(' ').map(n => n[0]).join('').slice(0, 2);
-
         return `
-        <div class="manager-item" style="cursor: pointer;" onclick="window.open('https://robotcorporation.bitrix24.ru/company/personal/user/${manager.id}/', '_blank')">
-            <div class="manager-rank ${rankClass}">${idx + 1}</div>
-            <div class="manager-avatar" ${manager.photo ? `style="background-image:url('${manager.photo}');background-size:cover;background-position:center;"` : ''}>${manager.photo ? '' : initials}</div>
+        <div class="manager-item" style="cursor:pointer;" onclick="window.open('https://robotcorporation.bitrix24.ru/company/personal/user/${manager.id}/','_blank')">
+            <div class="manager-rank ${rankClass}">${globalIdx+1}</div>
+            <div class="manager-avatar" ${manager.photo?`style="background-image:url('${manager.photo}');background-size:cover;background-position:center;"`:''}>
+                ${manager.photo?'':initials}
+            </div>
             <div class="manager-info">
                 <span class="manager-name">${manager.name}</span>
                 <span class="manager-deals">${manager.deals} сделок</span>
             </div>
             <div class="manager-stats">
-                <div class="manager-bar">
-                    <div class="bar-fill" style="width: ${percent}%"></div>
-                </div>
-                <span class="manager-value">₽ ${formatNumber(Math.round(manager.revenue / 1000))}K</span>
+                <div class="manager-bar"><div class="bar-fill" style="width:${percent}%"></div></div>
+                <span class="manager-value">₽ ${formatNumber(Math.round(manager.revenue/1000))}K</span>
             </div>
             <div class="manager-revenue">₽ ${formatNumber(manager.revenue)}</div>
         </div>`;
     }).join('');
+
+    // Пагинация
+    let pagination = container.parentNode.querySelector('.dash-mgr-pagination');
+    if (!pagination) {
+        pagination = document.createElement('div');
+        pagination.className = 'dash-mgr-pagination';
+        pagination.style.cssText = 'display:flex;justify-content:center;align-items:center;gap:8px;padding:12px;border-top:1px solid var(--border-color);';
+        container.parentNode.appendChild(pagination);
+    }
+    pagination.innerHTML = `
+        <button onclick="changeDashManagerPage(-1)" style="padding:4px 12px;border:1px solid var(--border-color);border-radius:var(--radius-sm);background:var(--bg-tertiary);cursor:pointer;" ${dashManagerPage===1?'disabled':''}>←</button>
+        <span style="font-size:0.8125rem;color:var(--text-secondary);">${dashManagerPage} / ${totalPages||1}</span>
+        <button onclick="changeDashManagerPage(1)" style="padding:4px 12px;border:1px solid var(--border-color);border-radius:var(--radius-sm);background:var(--bg-tertiary);cursor:pointer;" ${dashManagerPage>=totalPages?'disabled':''}>→</button>
+    `;
 }
 
+function changeDashManagerPage(dir) {
+    const totalPages = Math.ceil(currentManagers.length / dashManagersPerPage);
+    dashManagerPage = Math.max(1, Math.min(dashManagerPage + dir, totalPages));
+    updateManagersChart(sortManagers(currentManagers, currentManagerSort));
+}
+
+let funnelPage = 1;
+const funnelPerPage = 5;
+let lastFunnelData = {};
+
 function updateFunnelChart(funnel) {
+    lastFunnelData = funnel;
+    funnelPage = 1;
+    renderFunnelChart();
+}
+
+function renderFunnelChart() {
     const container = document.querySelector('.funnel-container');
     if (!container) return;
 
-    const stages = Object.entries(funnel);
-    const maxCount = Math.max(...stages.map(([_, count]) => count));
+    const allStages = Object.entries(lastFunnelData);
+    const totalPages = Math.ceil(allStages.length / funnelPerPage);
+    const start = (funnelPage - 1) * funnelPerPage;
+    const stages = allStages.slice(start, start + funnelPerPage);
+    const maxCount = Math.max(...allStages.map(([_, c]) => c));
     const stageClasses = ['stage-1', 'stage-2', 'stage-3', 'stage-4', 'stage-1'];
 
     container.innerHTML = stages.map(([name, count], idx) => {
@@ -521,7 +592,6 @@ function updateFunnelChart(funnel) {
         <div class="funnel-connector">
             <span class="conversion-rate">→ ${percent}%</span>
         </div>` : '';
-
         return `
         <div class="funnel-stage ${stageClass}">
             <div class="funnel-bar" style="--width: ${percent}%">
@@ -534,6 +604,26 @@ function updateFunnelChart(funnel) {
         </div>
         ${connector}`;
     }).join('');
+
+    // Пагинация
+    let pagination = document.querySelector('.funnel-pagination');
+    if (!pagination) {
+        pagination = document.createElement('div');
+        pagination.className = 'funnel-pagination';
+        pagination.style.cssText = 'display:flex;justify-content:center;align-items:center;gap:8px;padding:12px;border-top:1px solid var(--border-color);margin-top:8px;';
+        container.parentNode.appendChild(pagination);
+    }
+    pagination.innerHTML = `
+        <button onclick="changeFunnelPage(-1)" style="padding:4px 12px;border:1px solid var(--border-color);border-radius:var(--radius-sm);background:var(--bg-tertiary);cursor:pointer;" ${funnelPage===1?'disabled':''}>←</button>
+        <span style="font-size:0.8125rem;color:var(--text-secondary);">${funnelPage} / ${totalPages||1}</span>
+        <button onclick="changeFunnelPage(1)" style="padding:4px 12px;border:1px solid var(--border-color);border-radius:var(--radius-sm);background:var(--bg-tertiary);cursor:pointer;" ${funnelPage>=totalPages?'disabled':''}>→</button>
+    `;
+}
+
+function changeFunnelPage(dir) {
+    const totalPages = Math.ceil(Object.keys(lastFunnelData).length / funnelPerPage);
+    funnelPage = Math.max(1, Math.min(funnelPage + dir, totalPages));
+    renderFunnelChart();
 }
 
 function sortManagers(managers, sortBy) {
@@ -605,8 +695,8 @@ function initFilters() {
                 if (parent.closest('.sources-card')) {
                     const text = btn.textContent.trim();
                     if (text === 'Принятые') loadSources('accepted');
-                    if (text === 'Непринятые') loadSources('rejected');
-                    else fetchDashboardData(); // возврат к обычным данным
+                    else if (text === 'Непринятые') loadSources('rejected');
+                    else loadSources('all');
                 }
             }
         });
@@ -618,9 +708,11 @@ function initFilters() {
         btn.addEventListener('click', () => {
             metricBtns.forEach(b => b.classList.remove('active'));
             btn.classList.add('active');
-
-            // Animate channel bars with new values
-            animateChannelBars();
+            if (btn.textContent.trim() === 'Лиды' && window._lastSources) {
+                updateChannelsChartLeads(window._lastSources);
+            } else if (window._lastSources) {
+                updateChannelsChart(window._lastSources);
+            }
         });
     });
 }
@@ -773,13 +865,31 @@ async function loadLeads(status = 'all') {
         const dateFrom = new Date();
         dateFrom.setDate(today.getDate() - 30);
 
-        let url = `/api/leads?dateFrom=${dateFrom.toISOString().split('T')[0]}&dateTo=${today.toISOString().split('T')[0]}`;
-        if (status !== 'all') url += `&status=${status}`;
+        let url = `/api/stats/dashboard?dateFrom=${dateFrom.toISOString().split('T')[0]}&dateTo=${today.toISOString().split('T')[0]}`;
         if (bitrixDomain) url += `&domain=${encodeURIComponent(bitrixDomain)}`;
 
         const res = await fetch(url);
         const data = await res.json();
-        renderLeadsTable(data.leads || []);
+
+        // Берём сделки в работе как обращения
+        let leads = (data.dealsInProgress || []).map(deal => ({
+            id: deal.ID,
+            title: deal.TITLE || 'Без названия',
+            source: deal.stageName || '—',
+            status: deal.STAGE_ID,
+            dateCreate: deal.DATE_CREATE,
+            assignedName: `Менеджер ${deal.ASSIGNED_BY_ID}`,
+            assignedId: deal.ASSIGNED_BY_ID
+        }));
+
+        // Фильтрация
+        if (status === 'accepted') {
+            leads = leads.filter(l => !l.status.includes('LOSE') && !l.status.includes('JUNK'));
+        } else if (status === 'rejected') {
+            leads = leads.filter(l => l.status.includes('LOSE') || l.status.includes('JUNK'));
+        }
+
+        renderLeadsTable(leads);
     } catch (e) {
         container.innerHTML = '<div style="padding:32px;color:var(--danger);">Ошибка загрузки</div>';
     }
@@ -880,19 +990,30 @@ async function loadSources(status) {
         const dateFrom = new Date();
         dateFrom.setDate(today.getDate() - 30);
 
-        let url = `/api/leads?dateFrom=${dateFrom.toISOString().split('T')[0]}&dateTo=${today.toISOString().split('T')[0]}&status=${status}`;
+        let url = `/api/stats/dashboard?dateFrom=${dateFrom.toISOString().split('T')[0]}&dateTo=${today.toISOString().split('T')[0]}`;
         if (bitrixDomain) url += `&domain=${encodeURIComponent(bitrixDomain)}`;
 
         const res = await fetch(url);
         const data = await res.json();
 
+        if (status === 'all' || !status) {
+            updateDonutChart(window._lastSources || data.sources || {});
+            return;
+        }
+
+        // Фильтруем сделки по статусу для имитации принятых/непринятых
+        const allDeals = data.dealsInProgress || [];
+        const filtered = status === 'rejected' 
+            ? allDeals.filter(d => d.STAGE_ID && (d.STAGE_ID.includes('JUNK') || d.STAGE_ID.includes('LOSE') || d.stageName === 'Спам'))
+            : allDeals.filter(d => d.STAGE_ID && !d.STAGE_ID.includes('JUNK') && !d.STAGE_ID.includes('LOSE') && d.stageName !== 'Спам');
+
         const sources = {};
-        (data.leads || []).forEach(lead => {
-            const src = lead.source || 'Другие';
+        filtered.forEach(deal => {
+            const src = deal.stageName || 'Другие';
             sources[src] = (sources[src] || 0) + 1;
         });
 
-        updateDonutChart(sources);
+        updateDonutChart(Object.keys(sources).length > 0 ? sources : {'Нет данных': 1});
     } catch (e) {
         console.error('Failed to load sources:', e);
     }
@@ -1022,17 +1143,38 @@ function animateDataRefresh() {
 
 // Animate channel bars with new random values
 function animateChannelBars() {
-    const bars = document.querySelectorAll('.channel-bar');
-    const values = document.querySelectorAll('.channel-value');
+    const activeMetric = document.querySelector('.metric-btn.active');
+    const showLeads = activeMetric && activeMetric.textContent.trim() === 'Лиды';
+    
+    if (showLeads && window._lastSources) {
+        updateChannelsChartLeads(window._lastSources);
+    }
+}
 
-    bars.forEach((bar, index) => {
-        const newWidth = 30 + Math.random() * 60;
-        bar.style.width = newWidth + '%';
+function updateChannelsChartLeads(sources) {
+    const container = document.getElementById('channels-container');
+    if (!container) return;
 
-        if (values[index]) {
-            values[index].textContent = (15 + Math.random() * 20).toFixed(1) + '%';
-        }
-    });
+    const sortedSources = Object.entries(sources).sort((a, b) => b[1] - a[1]).slice(0, 8);
+    const maxCount = sortedSources[0]?.[1] || 1;
+    const colors = ['#2fc6f6', '#ffa900', '#9dcf00', '#ff5752', '#ab7fe6', '#ec4899', '#14b8a6', '#6366f1'];
+    const channelIcon = `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><line x1="2" y1="12" x2="22" y2="12"/><path d="M12 2a15.3 15.3 0 0 1 4 10 15.3 15.3 0 0 1-4 10 15.3 15.3 0 0 1-4-10 15.3 15.3 0 0 1 4-10z"/></svg>`;
+
+    container.innerHTML = sortedSources.map(([name, count], index) => {
+        const barWidth = ((count / maxCount) * 100).toFixed(0);
+        const color = colors[index % colors.length];
+        return `
+        <div class="channel-row">
+            <div class="channel-info">
+                <div class="channel-icon" style="background:${color}20;color:${color};">${channelIcon}</div>
+                <div class="channel-name"><span>${name}</span><span class="channel-leads">${count} лидов</span></div>
+            </div>
+            <div class="channel-bar-container">
+                <div class="channel-bar" style="width:${barWidth}%;background:${color};"></div>
+                <span class="channel-value">${count}</span>
+            </div>
+        </div>`;
+    }).join('');
 }
 
 // Hover effects for donut chart segments
