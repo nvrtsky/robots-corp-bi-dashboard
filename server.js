@@ -130,7 +130,12 @@ app.get('/api/stats/dashboard', async (req, res) => {
         const [dealsWon, leads, dealsInProgress, allDeals, stages, sourceStatuses, dealCategories, prevDealsWon, prevLeads] = await Promise.all([
             // Revenue: Deals WON (filtered by category if specified)
             client.call('crm.deal.list', {
-                filter: { STAGE_ID: 'WON', ...dateFilter, ...categoryFilter },
+                filter: { 
+                    STAGE_ID: 'WON', 
+                    ...categoryFilter,
+                    ...(dateFrom ? { '>=CLOSEDATE': dateFrom } : {}),
+                    ...(dateTo ? { '<=CLOSEDATE': dateTo } : {})
+                },
                 select: ['OPPORTUNITY', 'CURRENCY_ID', 'ASSIGNED_BY_ID']
             }),
             // Leads: All Leads (not filtered by category - leads don't have categories)
@@ -164,7 +169,7 @@ app.get('/api/stats/dashboard', async (req, res) => {
                 filter: { ...prevDateFilter },
                 select: ['ID']
             })
-        ]);
+            ]);  // ← закрываем Promise.all
 
         // Build source names map
         const sourceNames = {};
@@ -340,6 +345,70 @@ app.get('/api/funnels', async (req, res) => {
         console.log('[API] Falling back to mock funnels');
         const mockData = require('./mock-data');
         res.json(mockData.getFunnels());
+    }
+});
+
+// Leads endpoint with status filter
+app.get('/api/leads', async (req, res) => {
+    try {
+        const client = getClient(req);
+        const { dateFrom, dateTo, status } = req.query;
+
+        const dateFilter = {};
+        if (dateFrom) dateFilter['>=DATE_CREATE'] = dateFrom;
+        if (dateTo) dateFilter['<=DATE_CREATE'] = dateTo;
+
+        // Принятые = STATUS_ID: 'IN_PROCESS' или 'CONVERTED'
+        // Непринятые = STATUS_ID: 'JUNK' или 'NEW' без обработки
+        const statusFilter = {};
+        if (status === 'accepted') {
+            statusFilter.STATUS_ID = ['IN_PROCESS', 'CONVERTED'];
+        } else if (status === 'rejected') {
+            statusFilter.STATUS_ID = ['JUNK'];
+        }
+
+        const leads = await client.call('crm.lead.list', {
+            filter: { ...dateFilter, ...statusFilter },
+            select: ['ID', 'TITLE', 'NAME', 'LAST_NAME', 'SOURCE_ID', 'STATUS_ID', 'DATE_CREATE', 'ASSIGNED_BY_ID', 'PHONE', 'EMAIL']
+        });
+
+        // Получить имена менеджеров
+        const assignedIds = [...new Set(leads.result.map(l => l.ASSIGNED_BY_ID).filter(Boolean))];
+        let userNames = {};
+        if (assignedIds.length > 0) {
+            try {
+                const users = await client.call('user.get', { ID: assignedIds });
+                users.result.forEach(u => {
+                    userNames[u.ID] = `${u.NAME} ${u.LAST_NAME}`.trim();
+                });
+            } catch (e) {}
+        }
+
+        const result = leads.result.map(lead => ({
+            id: lead.ID,
+            title: lead.TITLE || `${lead.NAME || ''} ${lead.LAST_NAME || ''}`.trim() || 'Без названия',
+            source: lead.SOURCE_ID,
+            status: lead.STATUS_ID,
+            dateCreate: lead.DATE_CREATE,
+            assignedName: userNames[lead.ASSIGNED_BY_ID] || `Менеджер ${lead.ASSIGNED_BY_ID}`,
+            assignedId: lead.ASSIGNED_BY_ID
+        }));
+
+        res.json({ leads: result, total: leads.total || result.length });
+
+    } catch (e) {
+        console.error('[API Leads Error]', e.message);
+        // Mock fallback
+        const mockLeads = Array.from({ length: 20 }, (_, i) => ({
+            id: String(2000 + i),
+            title: `Обращение #${2000 + i}`,
+            source: ['Сайт', 'Реклама', 'Звонки', 'Рекомендации'][i % 4],
+            status: i % 5 === 0 ? 'JUNK' : i % 3 === 0 ? 'CONVERTED' : 'IN_PROCESS',
+            dateCreate: new Date(Date.now() - i * 86400000).toISOString(),
+            assignedName: ['Алексей Петров', 'Мария Козлова', 'Дмитрий Волков'][i % 3],
+            assignedId: String(i % 3 + 1)
+        }));
+        res.json({ leads: mockLeads, total: mockLeads.length, isDemo: true });
     }
 });
 

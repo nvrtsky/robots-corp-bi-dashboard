@@ -161,7 +161,7 @@ function showStep(stepIndex) {
                 const rect = el.getBoundingClientRect();
                 pulse.style.top = (rect.top + 8) + 'px';
                 pulse.style.left = (rect.left + 8) + 'px';
-            }, 700);
+            }, 400);
         } else {
             overlay.style.background = 'rgba(0,0,0,0.5)';
             overlay.style.clipPath = 'none';
@@ -202,7 +202,7 @@ function showStep(stepIndex) {
             }
         };
         window.addEventListener('scroll', activeTooltipScrollHandler);
-    }, 750);
+    }, 450);
 
     // Анимация появления
     setTimeout(() => tooltip.classList.add('visible'), 10);

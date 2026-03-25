@@ -109,10 +109,10 @@ document.addEventListener('click', () => {
 
 function initHelpTooltips() {
     const widgets = [
-        { selector: '.kpi-card.revenue .kpi-content', key: 'revenue' },
-        { selector: '.kpi-card.leads .kpi-content', key: 'leads' },
-        { selector: '.kpi-card.conversion .kpi-content', key: 'conversion' },
-        { selector: '.kpi-card.deals .kpi-content', key: 'deals' },
+        { selector: '.kpi-card.revenue', key: 'revenue', corner: true },
+        { selector: '.kpi-card.leads', key: 'leads', corner: true },
+        { selector: '.kpi-card.conversion', key: 'conversion', corner: true },
+        { selector: '.kpi-card.deals', key: 'deals', corner: true },
         { selector: '.funnel-card .chart-header', key: 'funnel' },
         { selector: '.sources-card .chart-header', key: 'sources' },
         { selector: '.managers-card .chart-header', key: 'managers' },
@@ -120,10 +120,17 @@ function initHelpTooltips() {
         { selector: '.channels-card .chart-header', key: 'channels' },
     ];
 
-    widgets.forEach(({ selector, key }) => {
+    widgets.forEach(({ selector, key, corner }) => {
         const el = document.querySelector(selector);
         if (!el) return;
         const btn = createHelpButton(key);
+        if (corner) {
+            btn.style.position = 'absolute';
+            btn.style.top = '12px';
+            btn.style.right = '12px';
+            btn.style.margin = '0';
+            // KPI карточка должна быть position: relative — уже есть в CSS
+        }
         el.appendChild(btn);
     });
 }

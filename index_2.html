@@ -724,71 +724,72 @@
                 </div>
             </section>
 
-            <!-- Страница Менеджеры -->
-            <div id="page-managers" class="page-section" style="display:none;">
-                <header class="header">
-                    <div class="header-left">
-                        <h1 class="page-title">Менеджеры</h1>
-                        <p class="page-subtitle">Детальная статистика по каждому менеджеру</p>
-                    </div>
-                </header>
-                <div id="managers-page-content">
-                    <div class="loading-placeholder">Загрузка данных менеджеров...</div>
-                </div>
+    <!-- Страница Менеджеры -->
+    <div id="page-managers" class="page-section" style="display:none;">
+        <header class="header">
+            <div class="header-left">
+                <h1 class="page-title">Менеджеры</h1>
+                <p class="page-subtitle">Детальная статистика по каждому менеджеру</p>
             </div>
+        </header>
+        <div id="managers-page-content">
+            <div class="loading-placeholder">Загрузка данных менеджеров...</div>
+        </div>
+    </div>
 
-            <!-- Страница Обращения -->
-            <div id="page-leads" class="page-section" style="display:none;">
-                <header class="header">
-                    <div class="header-left">
-                        <h1 class="page-title">Обращения</h1>
-                        <p class="page-subtitle">Все лиды и обращения из CRM</p>
-                    </div>
-                    <div class="header-right">
-                        <div class="chart-tabs">
-                            <button class="tab-btn active" onclick="loadLeads('all')">Все</button>
-                            <button class="tab-btn" onclick="loadLeads('accepted')">Принятые</button>
-                            <button class="tab-btn" onclick="loadLeads('rejected')">Непринятые</button>
-                        </div>
-                    </div>
-                </header>
-                <div class="chart-card">
-                    <div id="leads-table-container">
-                        <div class="loading-placeholder">Загрузка обращений...</div>
-                    </div>
+    <!-- Страница Обращения -->
+    <div id="page-leads" class="page-section" style="display:none;">
+        <header class="header">
+            <div class="header-left">
+                <h1 class="page-title">Обращения</h1>
+                <p class="page-subtitle">Все лиды и обращения из CRM</p>
+            </div>
+            <div class="header-right">
+                <div class="chart-tabs">
+                    <button class="tab-btn active" onclick="loadLeads('all')">Все</button>
+                    <button class="tab-btn" onclick="loadLeads('accepted')">Принятые</button>
+                    <button class="tab-btn" onclick="loadLeads('rejected')">Непринятые</button>
                 </div>
             </div>
+        </header>
+        <div class="chart-card">
+            <div id="leads-table-container">
+                <div class="loading-placeholder">Загрузка обращений...</div>
+            </div>
+        </div>
+    </div>
 
-            <!-- Страница База знаний -->
-            <div id="page-knowledge" class="page-section" style="display:none;">
-                <header class="header">
-                    <div class="header-left">
-                        <h1 class="page-title">База знаний</h1>
-                        <p class="page-subtitle">Документация и справочные материалы</p>
-                    </div>
-                </header>
-                <div id="knowledge-content" class="knowledge-layout">
-                    <div class="loading-placeholder">Загрузка базы знаний...</div>
-                </div>
+    <!-- Страница База знаний -->
+    <div id="page-knowledge" class="page-section" style="display:none;">
+        <header class="header">
+            <div class="header-left">
+                <h1 class="page-title">База знаний</h1>
+                <p class="page-subtitle">Документация и справочные материалы</p>
             </div>
+        </header>
+        <div id="knowledge-content" class="knowledge-layout">
+            <div class="loading-placeholder">Загрузка базы знаний...</div>
+        </div>
+    </div>
 
-            <!-- Страница Настройки -->
-            <div id="page-settings" class="page-section" style="display:none;">
-                <header class="header">
-                    <div class="header-left">
-                        <h1 class="page-title">Настройки</h1>
-                        <p class="page-subtitle">Конфигурация дашборда</p>
-                    </div>
-                </header>
-                <div class="chart-card" style="padding: 32px;">
-                    <h3 style="margin-bottom: 16px;">Онбординг</h3>
-                    <p style="color: var(--text-secondary); margin-bottom: 16px;">Пройдите интерактивный тур по дашборду заново</p>
-                    <button onclick="localStorage.removeItem('onboarding_completed'); startOnboarding();" 
-                        style="padding: 10px 20px; background: var(--accent-primary); color: white; border: none; border-radius: var(--radius-md); cursor: pointer; font-weight: 600;">
-                        🎓 Пройти обучение заново
-                    </button>
-                </div>
+    <!-- Страница Настройки -->
+    <div id="page-settings" class="page-section" style="display:none;">
+        <header class="header">
+            <div class="header-left">
+                <h1 class="page-title">Настройки</h1>
+                <p class="page-subtitle">Конфигурация дашборда</p>
             </div>
+        </header>
+        <div class="chart-card" style="padding: 32px;">
+            <h3 style="margin-bottom: 16px;">Онбординг</h3>
+            <p style="color: var(--text-secondary); margin-bottom: 16px;">Пройдите интерактивный тур по дашборду заново</p>
+            <button onclick="localStorage.removeItem('onboarding_completed'); startOnboarding();" 
+                style="padding: 10px 20px; background: var(--accent-primary); color: white; border: none; border-radius: var(--radius-md); cursor: pointer; font-weight: 600;">
+                🎓 Пройти обучение заново
+            </button>
+        </div>
+</div>
+
         </main>
     </div>
 

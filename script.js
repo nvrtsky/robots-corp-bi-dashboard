@@ -1,6 +1,8 @@
 // BI Dashboard Interactive JavaScript
 
 // Bitrix24 Integration
+let currentDeals = []; // кэш сделок
+let currentDealFilter = 'all'; // текущий фильтр
 let isInBitrix = false;
 let bitrixDomain = null;
 let currentPeriod = 'week'; // day, week, month
@@ -261,8 +263,10 @@ function updateDashboardUI(data) {
 
     // 3. Update Deals Table
     if (data.dealsInProgress && data.dealsInProgress.length > 0) {
-        updateDealsTable(data.dealsInProgress);
+        currentDeals = data.dealsInProgress;
+        updateDealsTable(filterDeals(data.dealsInProgress, currentDealFilter));
     }
+    
 
     // 4. Update Manager Stats
     if (data.managers && data.managers.length > 0) {
@@ -273,6 +277,29 @@ function updateDashboardUI(data) {
     // 5. Update Funnel
     if (data.funnel) {
         updateFunnelChart(data.funnel);
+    }
+}
+
+// Эти функции СНАРУЖИ:
+function filterDeals(deals, filter) {
+    if (filter === 'all') return deals;
+    return deals.filter(deal => {
+        const days = deal.daysInProgress || 0;
+        if (filter === 'fresh') return days < 7;
+        if (filter === 'normal') return days >= 7 && days <= 14;
+        if (filter === 'warning') return days > 14 && days <= 30;
+        if (filter === 'critical') return days > 30;
+        return true;
+    });
+}
+
+function filterDealsByDuration(filter) {
+    currentDealFilter = filter;
+    document.querySelectorAll('.duration-badge').forEach(btn => {
+        btn.style.opacity = btn.dataset.filter === filter ? '1' : '0.5';
+    });
+    if (currentDeals.length > 0) {
+        updateDealsTable(filterDeals(currentDeals, filter));
     }
 }
 
@@ -359,7 +386,7 @@ function updateDealsTable(deals) {
         else if (days > 30) durationClass = 'warning';
 
         return `
-        <tr>
+        <tr style="cursor: pointer;" onclick="window.open('https://robotcorporation.bitrix24.ru/crm/deal/details/${deal.ID}/', '_blank')">
             <td class="deal-name">
                 <span class="deal-id">#${deal.ID}</span>
                 ${deal.TITLE || 'Без названия'}
@@ -369,7 +396,7 @@ function updateDealsTable(deals) {
                 <div class="cell-avatar">ID${deal.ASSIGNED_BY_ID}</div>
             </td>
             <td><span class="stage-badge">${deal.stageName || deal.STAGE_ID}</span></td>
-            <td class="deal-amount">₽ ${formatNumber(deal.OPPORTUNITY || 0)}</td>
+            <td class="deal-amount">₽ ${formatNumber(parseFloat(deal.OPPORTUNITY) || 0)}</td>
             <td><span class="duration ${durationClass}">${days} дн.</span></td>
         </tr>
     `;
@@ -440,7 +467,7 @@ function updateManagersChart(managers) {
         const initials = manager.name.split(' ').map(n => n[0]).join('').slice(0, 2);
 
         return `
-        <div class="manager-item">
+        <div class="manager-item" style="cursor: pointer;" onclick="window.open('https://robotcorporation.bitrix24.ru/company/personal/user/${manager.id}/', '_blank')">
             <div class="manager-rank ${rankClass}">${idx + 1}</div>
             <div class="manager-avatar">${initials}</div>
             <div class="manager-info">
@@ -577,8 +604,184 @@ function initTabs() {
             e.preventDefault();
             navItems.forEach(nav => nav.classList.remove('active'));
             item.classList.add('active');
+            const page = item.dataset.page;
+            if (page) navigateTo(page);
         });
     });
+}
+
+function navigateTo(page) {
+    const dashboardSections = [
+        '.main-content > .header',
+        '.kpi-grid',
+        '.charts-row',
+        '.bottom-row',
+        '.channels-section'
+    ];
+
+    dashboardSections.forEach(sel => {
+        const el = document.querySelector(sel);
+        if (el) el.style.display = page === 'dashboard' ? '' : 'none';
+    });
+
+    document.querySelectorAll('.page-section').forEach(s => s.style.display = 'none');
+
+    if (page !== 'dashboard') {
+        const section = document.getElementById(`page-${page}`);
+        if (section) section.style.display = 'block';
+    }
+
+    if (page === 'managers') loadManagersPage();
+    if (page === 'leads') loadLeads('all');
+    if (page === 'knowledge') loadKnowledgePage();
+}
+
+async function loadManagersPage() {
+    const container = document.getElementById('managers-page-content');
+    if (!container) return;
+    container.innerHTML = '<div style="padding:32px;text-align:center;color:var(--text-secondary);">Загрузка...</div>';
+
+    if (currentManagers.length === 0) await fetchDashboardData();
+    renderManagersPage(currentManagers);
+}
+
+function renderManagersPage(managers) {
+    const container = document.getElementById('managers-page-content');
+    if (!container || !managers.length) return;
+
+    const medals = ['gold', 'silver', 'bronze'];
+    const maxRevenue = Math.max(...managers.map(m => m.revenue));
+
+    container.innerHTML = `
+        <div style="display:grid;grid-template-columns:repeat(3,1fr);gap:16px;margin-bottom:24px;">
+            <div class="chart-card" style="text-align:center;padding:24px;">
+                <div style="font-size:2rem;font-weight:800;color:var(--accent-primary)">${managers.length}</div>
+                <div style="color:var(--text-secondary);margin-top:4px;">Всего менеджеров</div>
+            </div>
+            <div class="chart-card" style="text-align:center;padding:24px;">
+                <div style="font-size:2rem;font-weight:800;color:var(--success)">₽ ${formatNumber(managers.reduce((s,m) => s+m.revenue,0))}</div>
+                <div style="color:var(--text-secondary);margin-top:4px;">Общая выручка</div>
+            </div>
+            <div class="chart-card" style="text-align:center;padding:24px;">
+                <div style="font-size:2rem;font-weight:800;color:var(--warning)">${managers.reduce((s,m) => s+m.deals,0)}</div>
+                <div style="color:var(--text-secondary);margin-top:4px;">Всего сделок</div>
+            </div>
+        </div>
+        <div class="chart-card">
+            <div class="chart-header"><h3>Рейтинг менеджеров</h3></div>
+            <div class="managers-list">
+                ${managers.map((m, idx) => {
+                    const percent = maxRevenue > 0 ? (m.revenue / maxRevenue * 100) : 0;
+                    const rankClass = medals[idx] || '';
+                    const initials = m.name.split(' ').map(n => n[0]).join('').slice(0, 2);
+                    return `
+                    <div class="manager-item" style="cursor:pointer;" onclick="window.open('https://robotcorporation.bitrix24.ru/company/personal/user/${m.id}/','_blank')">
+                        <div class="manager-rank ${rankClass}">${idx+1}</div>
+                        <div class="manager-avatar">${initials}</div>
+                        <div class="manager-info">
+                            <span class="manager-name">${m.name}</span>
+                            <span class="manager-deals">${m.deals} сделок</span>
+                        </div>
+                        <div class="manager-stats">
+                            <div class="manager-bar"><div class="bar-fill" style="width:${percent}%"></div></div>
+                            <span class="manager-value">₽ ${formatNumber(Math.round(m.revenue/1000))}K</span>
+                        </div>
+                        <div class="manager-revenue">₽ ${formatNumber(m.revenue)}</div>
+                    </div>`;
+                }).join('')}
+            </div>
+        </div>`;
+}
+
+async function loadLeads(status = 'all') {
+    const container = document.getElementById('leads-table-container');
+    if (!container) return;
+
+    document.querySelectorAll('#page-leads .tab-btn').forEach(btn => {
+        btn.classList.remove('active');
+        if (btn.getAttribute('onclick')?.includes(`'${status}'`)) btn.classList.add('active');
+    });
+
+    container.innerHTML = '<div style="padding:32px;text-align:center;color:var(--text-secondary);">Загрузка...</div>';
+
+    try {
+        const today = new Date();
+        const dateFrom = new Date();
+        dateFrom.setDate(today.getDate() - 30);
+
+        let url = `/api/leads?dateFrom=${dateFrom.toISOString().split('T')[0]}&dateTo=${today.toISOString().split('T')[0]}`;
+        if (status !== 'all') url += `&status=${status}`;
+        if (bitrixDomain) url += `&domain=${encodeURIComponent(bitrixDomain)}`;
+
+        const res = await fetch(url);
+        const data = await res.json();
+        renderLeadsTable(data.leads || []);
+    } catch (e) {
+        container.innerHTML = '<div style="padding:32px;color:var(--danger);">Ошибка загрузки</div>';
+    }
+}
+
+function renderLeadsTable(leads) {
+    const container = document.getElementById('leads-table-container');
+    if (!container) return;
+
+    const statusLabels = { 'NEW':'Новый','IN_PROCESS':'В работе','CONVERTED':'Конвертирован','JUNK':'Некачественный' };
+    const statusColors = { 'NEW':'var(--info)','IN_PROCESS':'var(--warning)','CONVERTED':'var(--success)','JUNK':'var(--danger)' };
+
+    if (!leads.length) {
+        container.innerHTML = '<div style="padding:32px;text-align:center;color:var(--text-secondary);">Нет обращений</div>';
+        return;
+    }
+
+    container.innerHTML = `
+        <div style="padding:16px;border-bottom:1px solid var(--border-color);">
+            <span style="font-weight:600;">Всего: ${leads.length}</span>
+        </div>
+        <div class="deals-table-wrapper">
+            <table class="deals-table">
+                <thead><tr><th>Обращение</th><th>Источник</th><th>Менеджер</th><th>Статус</th><th>Дата</th></tr></thead>
+                <tbody>
+                    ${leads.map(lead => `
+                    <tr style="cursor:pointer;" onclick="window.open('https://robotcorporation.bitrix24.ru/crm/lead/details/${lead.id}/','_blank')">
+                        <td class="deal-name"><span class="deal-id">#${lead.id}</span>${lead.title||'Без названия'}</td>
+                        <td>${lead.source||'—'}</td>
+                        <td><div style="display:flex;align-items:center;gap:8px;"><div class="cell-avatar">${(lead.assignedName||'М').charAt(0)}</div><span style="font-size:0.8125rem;">${lead.assignedName||'—'}</span></div></td>
+                        <td><span style="padding:4px 10px;border-radius:4px;font-size:0.6875rem;font-weight:600;background:${(statusColors[lead.status]||'var(--text-tertiary)')}22;color:${statusColors[lead.status]||'var(--text-tertiary)'};">${statusLabels[lead.status]||lead.status}</span></td>
+                        <td style="font-size:0.8125rem;color:var(--text-secondary);">${new Date(lead.dateCreate).toLocaleDateString('ru-RU')}</td>
+                    </tr>`).join('')}
+                </tbody>
+            </table>
+        </div>`;
+}
+
+function loadKnowledgePage() {
+    const container = document.getElementById('knowledge-content');
+    if (!container) return;
+
+    const articles = [
+        { cat: '📖 Начало работы', items: ['Как подключить Bitrix24', 'Первоначальная настройка', 'Системные требования'] },
+        { cat: '📊 Дашборд', items: ['Как читать KPI-карточки', 'Что такое воронка продаж', 'Как работает конверсия', 'Фильтрация по периодам'] },
+        { cat: '👥 Менеджеры', items: ['Рейтинг эффективности', 'Как рассчитывается конверсия', 'Планирование KPI'] },
+        { cat: '📈 Аналитика', items: ['Источники обращений', 'Эффективность каналов', 'Анализ трендов'] },
+        { cat: '⚙️ Администрирование', items: ['Управление доступом', 'Настройка воронок', 'Решение проблем'] },
+        { cat: '❓ FAQ', items: ['Частые вопросы', 'Глоссарий терминов'] },
+    ];
+
+    container.innerHTML = `
+        <div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(300px,1fr));gap:16px;">
+            ${articles.map(s => `
+            <div class="chart-card">
+                <h3 style="margin-bottom:16px;">${s.cat}</h3>
+                <div style="display:flex;flex-direction:column;gap:8px;">
+                    ${s.items.map(item => `
+                    <div style="padding:10px 14px;background:var(--bg-tertiary);border-radius:var(--radius-md);cursor:pointer;font-size:0.875rem;transition:all 0.15s;"
+                        onmouseover="this.style.background='var(--bg-card-hover)'"
+                        onmouseout="this.style.background='var(--bg-tertiary)'">
+                        📄 ${item}
+                    </div>`).join('')}
+                </div>
+            </div>`).join('')}
+        </div>`;
 }
 
 // Scroll Animations
@@ -643,7 +846,8 @@ function animateCounters() {
 
 // Format number with commas
 function formatNumber(num) {
-    return num.toString().replace(/\B(?=(\d{3})+(?!\d))/g, ',');
+    const n = parseFloat(num) || 0;
+    return Math.round(n).toString().replace(/\B(?=(\d{3})+(?!\d))/g, ',');
 }
 
 // Format date
@@ -682,7 +886,7 @@ function initRefreshButton() {
         setTimeout(() => {
             cooldown = false;
             refreshBtn.disabled = false;
-        }, 5000);
+        }, 3000);
     });
 }
 
