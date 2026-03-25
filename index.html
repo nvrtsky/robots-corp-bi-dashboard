@@ -96,9 +96,9 @@
                 </div>
                 <div class="header-right">
                     <div class="date-filter">
-                        <button class="filter-btn" data-period="day">День</button>
-                        <button class="filter-btn" data-period="week">Неделя</button>
-                        <button class="filter-btn active" data-period="month">Месяц</button>
+                        <button class="filter-btn main-filter-btn" data-period="day">День</button>
+                        <button class="filter-btn main-filter-btn" data-period="week">Неделя</button>
+                        <button class="filter-btn main-filter-btn active" data-period="month">Месяц</button>
                     </div>
                     <div class="date-range">
                         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
@@ -245,15 +245,15 @@
                     <div class="kpi-indicator">
                         <div class="indicator-item">
                             <span class="indicator-dot hot"></span>
-                            <span>42 горячих</span>
+                            <span>- горячих</span>
                         </div>
                         <div class="indicator-item">
                             <span class="indicator-dot warm"></span>
-                            <span>78 в процессе</span>
+                            <span>- в процессе</span>
                         </div>
                         <div class="indicator-item">
                             <span class="indicator-dot cold"></span>
-                            <span>36 стагнирующих</span>
+                            <span>- стагнирующих</span>
                         </div>
                     </div>
                 </div>
@@ -402,9 +402,9 @@
                     </div>
                     <div class="rejected-stats">
                         <div class="rejected-item">
-                            <span class="rejected-count">73</span>
+                            <span class="rejected-count" id="rejected-count">—</span>
                             <span class="rejected-label">Непринятых заявок</span>
-                            <span class="rejected-percent">7.9%</span>
+                            <span class="rejected-percent" id="rejected-percent"></span>
                         </div>
                     </div>
                 </div>
@@ -414,19 +414,21 @@
             <section class="bottom-row">
                 <!-- Manager Effectiveness -->
                 <div class="chart-card managers-card">
-                    <div class="chart-header">
-                        <h3>Эффективность менеджеров</h3>
-                        <div style="display:flex;gap:8px;align-items:center;">
-                            <div class="date-filter" style="margin:0;">
-                                <button class="mgr-filter-btn" data-period="day">День</button>
-                                <button class="mgr-filter-btn" data-period="week">Неделя</button>
-                                <button class="mgr-filter-btn active" data-period="month">Месяц</button>
-                            </div>
+                    <div class="chart-header" style="flex-direction:column;gap:8px;">
+                        <div style="display:flex;justify-content:space-between;align-items:center;width:100%;">
+                            <h3>Эффективность менеджеров</h3>
+                        </div>
+                        <div style="display:flex;justify-content:space-between;align-items:center;width:100%;">
                             <select class="chart-select">
-                            <option>По конверсии</option>
-                            <option>По выручке</option>
-                            <option>По сделкам</option>
+                                <option>По конверсии</option>
+                                <option>По выручке</option>
+                                <option>По сделкам</option>
                             </select>
+                            <div class="date-filter" style="margin:0;">
+                                <button class="mgr-filter-btn" data-period="day" onclick="fetchDashboardData('day')">День</button>
+                                <button class="mgr-filter-btn" data-period="week" onclick="fetchDashboardData('week')">Неделя</button>
+                                <button class="mgr-filter-btn active" data-period="month" onclick="fetchDashboardData('month')">Месяц</button>
+                            </div>
                         </div>
                     </div>
                     <div class="managers-list">
@@ -523,7 +525,7 @@
                     <div class="deals-table-wrapper">
                         <table class="deals-table">
                             <thead>
-                                <tr>
+                                32<tr>
                                     <th>Сделка</th>
                                     <th>Клиент</th>
                                     <th>Менеджер</th>
@@ -618,7 +620,7 @@
                 </div>
             </section>
 
-            <!-- Channel Effectiveness -->
+            <!-- Channel Effectiveness (исправленный блок) -->
             <section class="channels-section">
                 <div class="chart-card channels-card">
                     <div class="chart-header">
@@ -629,34 +631,14 @@
                         </div>
                     </div>
                     <div id="channels-container" class="channels-chart">
-                        <div class="channel-row">
-                            <div class="channel-info">
-                                <div class="channel-icon" style="background: #2fc6f620; color: #2fc6f6;">
-                                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                                        <circle cx="12" cy="12" r="10" />
-                                        <line x1="2" y1="12" x2="22" y2="12" />
-                                        <path
-                                            d="M12 2a15.3 15.3 0 0 1 4 10 15.3 15.3 0 0 1-4 10 15.3 15.3 0 0 1-4-10 15.3 15.3 0 0 1 4-10z" />
-                                    </svg>
-                                </div>
-                                <div class="channel-name">
-                                    <span>Органический трафик</span>
-                                    <span class="channel-leads">312 лидов</span>
-                                </div>
-                            </div>
-                            <div class="channel-bar-container">
-                                <div class="channel-bar" style="width: 88%; background: #2fc6f6;"></div>
-                                <span class="channel-value">28.4%</span>
-                            </div>
-                        </div>
+                        <!-- Статические строки каналов перенесены внутрь контейнера -->
                         <div class="channel-row">
                             <div class="channel-info">
                                 <div class="channel-icon" style="background: #ffa90020; color: #ffa900;">
                                     <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
                                         <circle cx="12" cy="12" r="10" />
                                         <line x1="2" y1="12" x2="22" y2="12" />
-                                        <path
-                                            d="M12 2a15.3 15.3 0 0 1 4 10 15.3 15.3 0 0 1-4 10 15.3 15.3 0 0 1-4-10 15.3 15.3 0 0 1 4-10z" />
+                                        <path d="M12 2a15.3 15.3 0 0 1 4 10 15.3 15.3 0 0 1-4 10 15.3 15.3 0 0 1-4-10 15.3 15.3 0 0 1 4-10z" />
                                     </svg>
                                 </div>
                                 <div class="channel-name">
@@ -675,8 +657,7 @@
                                     <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
                                         <circle cx="12" cy="12" r="10" />
                                         <line x1="2" y1="12" x2="22" y2="12" />
-                                        <path
-                                            d="M12 2a15.3 15.3 0 0 1 4 10 15.3 15.3 0 0 1-4 10 15.3 15.3 0 0 1-4-10 15.3 15.3 0 0 1 4-10z" />
+                                        <path d="M12 2a15.3 15.3 0 0 1 4 10 15.3 15.3 0 0 1-4 10 15.3 15.3 0 0 1-4-10 15.3 15.3 0 0 1 4-10z" />
                                     </svg>
                                 </div>
                                 <div class="channel-name">

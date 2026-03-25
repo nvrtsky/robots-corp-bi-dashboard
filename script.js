@@ -112,7 +112,44 @@ function setupAutoResize() {
 }
 
 document.addEventListener('DOMContentLoaded', () => {
-    // Показать скелетоны до загрузки данных
+    // Скелетоны KPI
+    document.querySelectorAll('.kpi-value').forEach(el => el.classList.add('skeleton'));
+    document.querySelectorAll('.kpi-change span').forEach(el => el.classList.add('skeleton'));
+
+    const sourcesLegend = document.querySelector('.sources-legend');
+    if (sourcesLegend) {
+        sourcesLegend.innerHTML = Array(4).fill(`
+            <div class="source-item">
+                <div class="skeleton" style="width:12px;height:12px;border-radius:3px;"></div>
+                <div style="flex:1;">
+                    <div class="skeleton" style="height:12px;width:80px;border-radius:4px;margin-bottom:4px;"></div>
+                    <div class="skeleton" style="height:10px;width:50px;border-radius:4px;"></div>
+                </div>
+                <div class="skeleton" style="height:6px;width:100px;border-radius:3px;"></div>
+            </div>`).join('');
+    }
+
+    // Скелетон таблицы сделок
+    const dealsTableBody = document.querySelector('.deals-table tbody');
+    if (dealsTableBody) {
+        dealsTableBody.innerHTML = Array(5).fill(`
+            <tr>
+                <td><div class="skeleton" style="height:16px;width:140px;border-radius:4px;"></div></td>
+                <td><div class="skeleton" style="height:16px;width:60px;border-radius:4px;"></div></td>
+                <td><div class="skeleton" style="height:16px;width:40px;border-radius:4px;"></div></td>
+                <td><div class="skeleton" style="height:16px;width:80px;border-radius:4px;"></div></td>
+                <td><div class="skeleton" style="height:16px;width:70px;border-radius:4px;"></div></td>
+                <td><div class="skeleton" style="height:16px;width:50px;border-radius:4px;"></div></td>
+            </tr>`).join('');
+    }
+
+    // Скелетон менеджеров
+    document.querySelectorAll('.manager-item').forEach(el => {
+        el.style.opacity = '0.3';
+        el.style.pointerEvents = 'none';
+    });
+
+    // Фильтр менеджеров в виджете
     document.querySelectorAll('.mgr-filter-btn').forEach(btn => {
         btn.addEventListener('click', () => {
             document.querySelectorAll('.mgr-filter-btn').forEach(b => b.classList.remove('active'));
@@ -121,14 +158,9 @@ document.addEventListener('DOMContentLoaded', () => {
             if (period) fetchDashboardData(period);
         });
     });
-    document.querySelectorAll('.manager-item').forEach(el => {
-        el.style.opacity = '0.3';
-        el.style.pointerEvents = 'none';
-    });
-    // Initialize Bitrix24 integration
-    initBitrix24();
 
-    // Initialize all components
+    // Initialize
+    initBitrix24();
     initFilters();
     initTabs();
     initAnimations();
@@ -137,11 +169,9 @@ document.addEventListener('DOMContentLoaded', () => {
     initHelpTooltips();
     checkAutoStart();
 
-    // Fetch real data - only if NOT running in Bitrix24 context
-    // If BX24 SDK is available, fetchDashboardData will be called from BX24.init callback
     if (typeof window.BX24 === 'undefined' || !window.BX24) {
         console.log('[Dashboard] No BX24 SDK, fetching data immediately');
-        loadFunnels(); // Load funnel tabs first
+        loadFunnels();
         fetchDashboardData();
     }
 });
@@ -270,11 +300,22 @@ function updateDashboardUI(data) {
         updateKPIChange('.kpi-card.deals', data.changes.dealsInProgress);
     }
 
-    // 2. Update Sources Donut Chart
+    // 2. Update Sources & Channels
     if (data.sources) {
         window._lastSources = data.sources;
         updateDonutChart(data.sources);
-        updateChannelsChart(data.sources); // Update channels section too
+        updateChannelsChart(data.sources);
+    }
+
+    // Индикаторы сделок
+    if (data.dealsInProgress) {
+        const hot = data.dealsInProgress.filter(d => d.daysInProgress < 7).length;
+        const warm = data.dealsInProgress.filter(d => d.daysInProgress >= 7 && d.daysInProgress <= 30).length;
+        const cold = data.dealsInProgress.filter(d => d.daysInProgress > 30).length;
+        const indicators = document.querySelectorAll('.indicator-item span:last-child');
+        if (indicators[0]) indicators[0].textContent = `${hot} горячих`;
+        if (indicators[1]) indicators[1].textContent = `${warm} в процессе`;
+        if (indicators[2]) indicators[2].textContent = `${cold} стагнирующих`;
     }
 
     // 3. Update Deals Table
@@ -569,7 +610,10 @@ const funnelPerPage = 5;
 let lastFunnelData = {};
 
 function updateFunnelChart(funnel) {
-    lastFunnelData = funnel;
+    // Сортировка по убыванию количества
+    lastFunnelData = Object.fromEntries(
+        Object.entries(funnel).sort((a, b) => b[1] - a[1])
+    );
     funnelPage = 1;
     renderFunnelChart();
 }
@@ -654,7 +698,7 @@ function initManagerSort() {
 
 // Period Filter Buttons
 function initFilters() {
-    const filterBtns = document.querySelectorAll('.filter-btn');
+    const filterBtns = document.querySelectorAll('.main-filter-btn');
     filterBtns.forEach(btn => {
         btn.addEventListener('click', () => {
             filterBtns.forEach(b => b.classList.remove('active'));
@@ -796,12 +840,23 @@ function renderManagersPage(managers) {
             </div>
         </div>
         <div class="chart-card">
-            <div class="chart-header">
-                <h3>Рейтинг менеджеров</h3>
-                <div class="date-filter">
-                    <button class="filter-btn ${managersPeriod==='day'?'active':''}" onclick="changeManagersPeriod('day')">День</button>
-                    <button class="filter-btn ${managersPeriod==='week'?'active':''}" onclick="changeManagersPeriod('week')">Неделя</button>
-                    <button class="filter-btn ${managersPeriod==='month'?'active':''}" onclick="changeManagersPeriod('month')">Месяц</button>
+            <div class="chart-header" style="flex-direction:column;gap:8px;">
+                <div style="display:flex;justify-content:space-between;align-items:center;width:100%;">
+                    <h3>Эффективность менеджеров</h3>
+                    <div id="managers-help-anchor"></div>
+                    <!-- help-tooltip добавится автоматически через JS -->
+                </div>
+                <div style="display:flex;justify-content:space-between;align-items:center;width:100%;">
+                    <select class="chart-select">
+                        <option>По конверсии</option>
+                        <option>По выручке</option>
+                        <option>По сделкам</option>
+                    </select>
+                    <div class="date-filter" style="margin:0;">
+                        <button class="mgr-filter-btn ${managersPeriod==='day'?'active':''}" onclick="changeManagersPeriod('day')">День</button>
+                        <button class="mgr-filter-btn ${managersPeriod==='week'?'active':''}" onclick="changeManagersPeriod('week')">Неделя</button>
+                        <button class="mgr-filter-btn ${managersPeriod==='month'?'active':''}" onclick="changeManagersPeriod('month')">Месяц</button>
+                    </div>
                 </div>
             </div>
             <div class="managers-list">
@@ -837,6 +892,10 @@ function renderManagersPage(managers) {
 async function changeManagersPeriod(period) {
     managersPeriod = period;
     managersPage = 1;
+    // Обновить активную кнопку
+    document.querySelectorAll('#managers-page-content .mgr-filter-btn').forEach(b => {
+        b.classList.toggle('active', b.textContent.trim() === {day:'День',week:'Неделя',month:'Месяц'}[period]);
+    });
     const container = document.getElementById('managers-page-content');
     if (container) container.innerHTML = '<div style="padding:32px;text-align:center;color:var(--text-secondary);">Загрузка...</div>';
     await fetchDashboardData(period);

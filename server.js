@@ -278,7 +278,7 @@ app.get('/api/stats/dashboard', async (req, res) => {
 
         // Calculate conversion rate
         const totalDeals = allDeals.total || allDeals.result.length;
-        const wonDeals = dealsWon.total || dealsWon.result.length;
+        const wonDeals = dealsWon.result.length;
         const conversionRate = totalDeals > 0 ? ((wonDeals / totalDeals) * 100).toFixed(1) : 0;
 
         // Расчёт % изменений
