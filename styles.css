@@ -1682,9 +1682,9 @@ body.bitrix-mode .app {
     width: 24px;
     height: 24px;
     border-radius: 50%;
-    border: 1.5px solid var(--danger);
+    border: 1.5px solid var(--text-tertiary);
     background: transparent;
-    color: var(--danger);
+    color: var(--text-tertiary);
     font-size: 0.75rem;
     font-weight: 700;
     cursor: pointer;

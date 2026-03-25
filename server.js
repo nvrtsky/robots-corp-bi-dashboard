@@ -131,10 +131,8 @@ app.get('/api/stats/dashboard', async (req, res) => {
             // Revenue: Deals WON (filtered by category if specified)
             client.call('crm.deal.list', {
                 filter: { 
-                    STAGE_ID: 'WON', 
+                    SEMANTIC: 'S', 
                     ...categoryFilter,
-                    ...(dateFrom ? { '>=CLOSEDATE': dateFrom } : {}),
-                    ...(dateTo ? { '<=CLOSEDATE': dateTo } : {})
                 },
                 select: ['OPPORTUNITY', 'CURRENCY_ID', 'ASSIGNED_BY_ID']
             }),
@@ -145,7 +143,11 @@ app.get('/api/stats/dashboard', async (req, res) => {
             }),
             // Deals In Progress: Not WON and Not LOSE (filtered by category)
             client.call('crm.deal.list', {
-                filter: { '!STAGE_ID': ['WON', 'LOSE'], ...dateFilter, ...categoryFilter },
+                filter: {
+                    '!SEMANTIC': ['S', 'F'],
+                    ...dateFilter,
+                    ...categoryFilter
+                },
                 select: ['ID', 'TITLE', 'OPPORTUNITY', 'ASSIGNED_BY_ID', 'DATE_CREATE', 'STAGE_ID', 'CATEGORY_ID']
             }),
             // All Deals for funnel (filtered by category)
@@ -161,7 +163,7 @@ app.get('/api/stats/dashboard', async (req, res) => {
             client.call('crm.dealcategory.list'),
             // Предыдущий период: выигранные сделки
             client.call('crm.deal.list', {
-                filter: { STAGE_ID: 'WON', ...prevDateFilter, ...categoryFilter },
+                filter: { SEMANTIC: 'S', ...prevDateFilter, ...categoryFilter },
                 select: ['OPPORTUNITY']
             }),
             // Предыдущий период: лиды
@@ -237,12 +239,16 @@ app.get('/api/stats/dashboard', async (req, res) => {
         let managers = [];
         if (managerIds.length > 0) {
             try {
-                const usersRes = await client.call('user.get', { ID: managerIds });
+                const usersRes = await client.call('user.get', {
+                    ID: managerIds,
+                    select: ['ID', 'NAME', 'LAST_NAME', 'PERSONAL_PHOTO'],
+                });
                 managers = managerIds.map(id => {
                     const user = usersRes.result.find(u => String(u.ID) === String(id));
                     return {
                         id,
                         name: user ? `${user.NAME} ${user.LAST_NAME}`.trim() : `Менеджер ${id}`,
+                        photo: user ? (user.PERSONAL_PHOTO || null) : null,
                         deals: managerStats[id].count,
                         revenue: managerStats[id].revenue
                     };
@@ -299,7 +305,7 @@ app.get('/api/stats/dashboard', async (req, res) => {
             dealsInProgress: dealsWithDuration,
             sources,
             funnel: funnelData,
-            managers: managers.slice(0, 6),
+            managers: managers,
             conversionRate: parseFloat(conversionRate),
             totalDeals,
             wonDeals,
@@ -387,7 +393,7 @@ app.get('/api/leads', async (req, res) => {
         const result = leads.result.map(lead => ({
             id: lead.ID,
             title: lead.TITLE || `${lead.NAME || ''} ${lead.LAST_NAME || ''}`.trim() || 'Без названия',
-            source: lead.SOURCE_ID,
+            source: lead.SOURCE_ID || 'Другой',
             status: lead.STATUS_ID,
             dateCreate: lead.DATE_CREATE,
             assignedName: userNames[lead.ASSIGNED_BY_ID] || `Менеджер ${lead.ASSIGNED_BY_ID}`,

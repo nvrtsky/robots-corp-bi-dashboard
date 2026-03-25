@@ -64,8 +64,8 @@ class BitrixClient {
         // Strategy: Assume we might receive CLIENT_ID/SECRET via env vars or just fail for now.
         // Alternatively, reuse the special 'https://oauth.bitrix.info/oauth/token/' endpoint if applicable.
 
-        const CLIENT_ID = process.env.BITRIX_CLIENT_ID;
-        const CLIENT_SECRET = process.env.BITRIX_CLIENT_SECRET;
+        const CLIENT_ID = process.env.BITRIX_CLIENT_ID || 'local.69844be8d9bdc7.52030760';
+        const CLIENT_SECRET = process.env.BITRIX_CLIENT_SECRET || 'Wj0QkYFTZaZ9bPeACddQoQJsc2dNhwniqC3XZwCRMXmR5H7drd';
 
         if (!CLIENT_ID || !CLIENT_SECRET) {
             throw new Error('BITRIX_CLIENT_ID and BITRIX_CLIENT_SECRET env vars are required for token refresh');

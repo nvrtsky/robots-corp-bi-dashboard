@@ -10,6 +10,8 @@ let currentCategory = 'all'; // funnel category ID ('all' = all funnels)
 let funnelsList = []; // loaded funnels
 let currentManagers = []; // кэш загруженных менеджеров
 let currentManagerSort = 'revenue'; // текущая сортировка
+let currentPage = 1;
+const dealsPerPage = 5;
 
 // Check if running in Bitrix24 context
 function detectBitrixContext() {
@@ -158,10 +160,10 @@ function renderFunnelTabs() {
     if (!select) return;
 
     // Keep "All" option, add others
-    select.innerHTML = '<option value="all">Все воронки</option>';
+    select.innerHTML = '';
 
     // Add options for each funnel
-    funnelsList.forEach(funnel => {
+    funnelsList.filter(f => f.NAME !== 'Общая').forEach(funnel => {
         const option = document.createElement('option');
         option.value = funnel.ID;
         option.textContent = funnel.NAME;
@@ -378,29 +380,48 @@ function updateDealsTable(deals) {
     const tbody = document.querySelector('.deals-table tbody');
     if (!tbody) return;
 
-    tbody.innerHTML = deals.map(deal => {
-        // Duration badge color
+    const total = deals.length;
+    const totalPages = Math.ceil(total / dealsPerPage);
+    const start = (currentPage - 1) * dealsPerPage;
+    const paginated = deals.slice(start, start + dealsPerPage);
+
+    tbody.innerHTML = paginated.map(deal => {
         let durationClass = 'normal';
         const days = deal.daysInProgress || 0;
-        if (days > 60) durationClass = 'critical';
-        else if (days > 30) durationClass = 'warning';
+        if (days > 30) durationClass = 'critical';
+        else if (days > 14) durationClass = 'warning';
+        else if (days < 7) durationClass = 'fresh';
 
         return `
-        <tr style="cursor: pointer;" onclick="window.open('https://robotcorporation.bitrix24.ru/crm/deal/details/${deal.ID}/', '_blank')">
-            <td class="deal-name">
-                <span class="deal-id">#${deal.ID}</span>
-                ${deal.TITLE || 'Без названия'}
-            </td>
+        <tr style="cursor:pointer;" onclick="window.open('https://robotcorporation.bitrix24.ru/crm/deal/details/${deal.ID}/','_blank')">
+            <td class="deal-name"><span class="deal-id">#${deal.ID}</span>${deal.TITLE||'Без названия'}</td>
             <td>—</td>
-            <td>
-                <div class="cell-avatar">ID${deal.ASSIGNED_BY_ID}</div>
-            </td>
-            <td><span class="stage-badge">${deal.stageName || deal.STAGE_ID}</span></td>
-            <td class="deal-amount">₽ ${formatNumber(parseFloat(deal.OPPORTUNITY) || 0)}</td>
+            <td><div class="cell-avatar">ID${deal.ASSIGNED_BY_ID}</div></td>
+            <td><span class="stage-badge">${deal.stageName||deal.STAGE_ID}</span></td>
+            <td class="deal-amount">₽ ${formatNumber(parseFloat(deal.OPPORTUNITY)||0)}</td>
             <td><span class="duration ${durationClass}">${days} дн.</span></td>
-        </tr>
-    `;
+        </tr>`;
     }).join('');
+
+    // Пагинация
+    const summary = document.querySelector('.deals-summary');
+    if (summary) {
+        const pagination = document.querySelector('.deals-pagination') || document.createElement('div');
+        pagination.className = 'deals-pagination';
+        pagination.style.cssText = 'display:flex;justify-content:center;align-items:center;gap:8px;padding:12px;border-top:1px solid var(--border-color);';
+        pagination.innerHTML = `
+            <button onclick="changePage(-1)" style="padding:4px 12px;border:1px solid var(--border-color);border-radius:var(--radius-sm);background:var(--bg-tertiary);cursor:pointer;" ${currentPage===1?'disabled':''}>←</button>
+            <span style="font-size:0.8125rem;color:var(--text-secondary);">${currentPage} / ${totalPages||1}</span>
+            <button onclick="changePage(1)" style="padding:4px 12px;border:1px solid var(--border-color);border-radius:var(--radius-sm);background:var(--bg-tertiary);cursor:pointer;" ${currentPage>=totalPages?'disabled':''}>→</button>
+        `;
+        summary.parentNode.insertBefore(pagination, summary);
+    }
+}
+
+function changePage(dir) {
+    const totalPages = Math.ceil(currentDeals.length / dealsPerPage);
+    currentPage = Math.max(1, Math.min(currentPage + dir, totalPages));
+    updateDealsTable(filterDeals(currentDeals, currentDealFilter));
 }
 
 // Update Channels Chart (Эффективность каналов)
@@ -469,7 +490,7 @@ function updateManagersChart(managers) {
         return `
         <div class="manager-item" style="cursor: pointer;" onclick="window.open('https://robotcorporation.bitrix24.ru/company/personal/user/${manager.id}/', '_blank')">
             <div class="manager-rank ${rankClass}">${idx + 1}</div>
-            <div class="manager-avatar">${initials}</div>
+            <div class="manager-avatar" ${manager.photo ? `style="background-image:url('${manager.photo}');background-size:cover;background-position:center;"` : ''}>${manager.photo ? '' : initials}</div>
             <div class="manager-info">
                 <span class="manager-name">${manager.name}</span>
                 <span class="manager-deals">${manager.deals} сделок</span>
@@ -579,6 +600,14 @@ function initFilters() {
             if (parent) {
                 parent.querySelectorAll('.tab-btn').forEach(b => b.classList.remove('active'));
                 btn.classList.add('active');
+
+                // Фильтрация источников
+                if (parent.closest('.sources-card')) {
+                    const text = btn.textContent.trim();
+                    if (text === 'Принятые') loadSources('accepted');
+                    if (text === 'Непринятые') loadSources('rejected');
+                    else fetchDashboardData(); // возврат к обычным данным
+                }
             }
         });
     });
@@ -645,12 +674,19 @@ async function loadManagersPage() {
     renderManagersPage(currentManagers);
 }
 
+let managersPeriod = 'month';
+let managersPage = 1;
+const managersPerPage = 5;
+
 function renderManagersPage(managers) {
     const container = document.getElementById('managers-page-content');
     if (!container || !managers.length) return;
 
     const medals = ['gold', 'silver', 'bronze'];
     const maxRevenue = Math.max(...managers.map(m => m.revenue));
+    const totalPages = Math.ceil(managers.length / managersPerPage);
+    const start = (managersPage - 1) * managersPerPage;
+    const paginated = managers.slice(start, start + managersPerPage);
 
     container.innerHTML = `
         <div style="display:grid;grid-template-columns:repeat(3,1fr);gap:16px;margin-bottom:24px;">
@@ -659,25 +695,33 @@ function renderManagersPage(managers) {
                 <div style="color:var(--text-secondary);margin-top:4px;">Всего менеджеров</div>
             </div>
             <div class="chart-card" style="text-align:center;padding:24px;">
-                <div style="font-size:2rem;font-weight:800;color:var(--success)">₽ ${formatNumber(managers.reduce((s,m) => s+m.revenue,0))}</div>
+                <div style="font-size:2rem;font-weight:800;color:var(--success)">₽ ${formatNumber(managers.reduce((s,m)=>s+m.revenue,0))}</div>
                 <div style="color:var(--text-secondary);margin-top:4px;">Общая выручка</div>
             </div>
             <div class="chart-card" style="text-align:center;padding:24px;">
-                <div style="font-size:2rem;font-weight:800;color:var(--warning)">${managers.reduce((s,m) => s+m.deals,0)}</div>
+                <div style="font-size:2rem;font-weight:800;color:var(--warning)">${managers.reduce((s,m)=>s+m.deals,0)}</div>
                 <div style="color:var(--text-secondary);margin-top:4px;">Всего сделок</div>
             </div>
         </div>
         <div class="chart-card">
-            <div class="chart-header"><h3>Рейтинг менеджеров</h3></div>
+            <div class="chart-header">
+                <h3>Рейтинг менеджеров</h3>
+                <div class="date-filter">
+                    <button class="filter-btn ${managersPeriod==='day'?'active':''}" onclick="changeManagersPeriod('day')">День</button>
+                    <button class="filter-btn ${managersPeriod==='week'?'active':''}" onclick="changeManagersPeriod('week')">Неделя</button>
+                    <button class="filter-btn ${managersPeriod==='month'?'active':''}" onclick="changeManagersPeriod('month')">Месяц</button>
+                </div>
+            </div>
             <div class="managers-list">
-                ${managers.map((m, idx) => {
+                ${paginated.map((m, idx) => {
+                    const globalIdx = start + idx;
                     const percent = maxRevenue > 0 ? (m.revenue / maxRevenue * 100) : 0;
-                    const rankClass = medals[idx] || '';
-                    const initials = m.name.split(' ').map(n => n[0]).join('').slice(0, 2);
+                    const rankClass = medals[globalIdx] || '';
+                    const initials = m.name.split(' ').map(n=>n[0]).join('').slice(0,2);
                     return `
                     <div class="manager-item" style="cursor:pointer;" onclick="window.open('https://robotcorporation.bitrix24.ru/company/personal/user/${m.id}/','_blank')">
-                        <div class="manager-rank ${rankClass}">${idx+1}</div>
-                        <div class="manager-avatar">${initials}</div>
+                        <div class="manager-rank ${rankClass}">${globalIdx+1}</div>
+                        <div class="manager-avatar" ${m.photo?`style="background-image:url('${m.photo}');background-size:cover;background-position:center;"`:''}>${m.photo?'':initials}</div>
                         <div class="manager-info">
                             <span class="manager-name">${m.name}</span>
                             <span class="manager-deals">${m.deals} сделок</span>
@@ -690,7 +734,27 @@ function renderManagersPage(managers) {
                     </div>`;
                 }).join('')}
             </div>
+            <div style="display:flex;justify-content:center;align-items:center;gap:8px;padding:12px;border-top:1px solid var(--border-color);">
+                <button onclick="changeManagersPage(-1)" style="padding:4px 12px;border:1px solid var(--border-color);border-radius:var(--radius-sm);background:var(--bg-tertiary);cursor:pointer;" ${managersPage===1?'disabled':''}>←</button>
+                <span style="font-size:0.8125rem;color:var(--text-secondary);">${managersPage} / ${totalPages||1}</span>
+                <button onclick="changeManagersPage(1)" style="padding:4px 12px;border:1px solid var(--border-color);border-radius:var(--radius-sm);background:var(--bg-tertiary);cursor:pointer;" ${managersPage>=totalPages?'disabled':''}>→</button>
+            </div>
         </div>`;
+}
+
+async function changeManagersPeriod(period) {
+    managersPeriod = period;
+    managersPage = 1;
+    const container = document.getElementById('managers-page-content');
+    if (container) container.innerHTML = '<div style="padding:32px;text-align:center;color:var(--text-secondary);">Загрузка...</div>';
+    await fetchDashboardData(period);
+    renderManagersPage(currentManagers);
+}
+
+function changeManagersPage(dir) {
+    const totalPages = Math.ceil(currentManagers.length / managersPerPage);
+    managersPage = Math.max(1, Math.min(managersPage + dir, totalPages));
+    renderManagersPage(currentManagers);
 }
 
 async function loadLeads(status = 'all') {
@@ -721,37 +785,63 @@ async function loadLeads(status = 'all') {
     }
 }
 
+let leadsPage = 1;
+const leadsPerPage = 5;
+let currentLeads = [];
+
 function renderLeadsTable(leads) {
+    currentLeads = leads;
+    leadsPage = 1;
+    renderLeadsPage();
+}
+
+function renderLeadsPage() {
     const container = document.getElementById('leads-table-container');
     if (!container) return;
 
-    const statusLabels = { 'NEW':'Новый','IN_PROCESS':'В работе','CONVERTED':'Конвертирован','JUNK':'Некачественный' };
-    const statusColors = { 'NEW':'var(--info)','IN_PROCESS':'var(--warning)','CONVERTED':'var(--success)','JUNK':'var(--danger)' };
+    const statusLabels = {'NEW':'Новый','IN_PROCESS':'В работе','CONVERTED':'Конвертирован','JUNK':'Некачественный'};
+    const statusColors = {'NEW':'var(--info)','IN_PROCESS':'var(--warning)','CONVERTED':'var(--success)','JUNK':'var(--danger)'};
 
-    if (!leads.length) {
+    if (!currentLeads.length) {
         container.innerHTML = '<div style="padding:32px;text-align:center;color:var(--text-secondary);">Нет обращений</div>';
         return;
     }
 
+    const totalPages = Math.ceil(currentLeads.length / leadsPerPage);
+    const start = (leadsPage - 1) * leadsPerPage;
+    const paginated = currentLeads.slice(start, start + leadsPerPage);
+
     container.innerHTML = `
-        <div style="padding:16px;border-bottom:1px solid var(--border-color);">
-            <span style="font-weight:600;">Всего: ${leads.length}</span>
+        <div style="padding:16px;border-bottom:1px solid var(--border-color);display:flex;justify-content:space-between;align-items:center;">
+            <span style="font-weight:600;">Всего: ${currentLeads.length}</span>
+            <span style="font-size:0.8125rem;color:var(--text-secondary);">${leadsPage} / ${totalPages}</span>
         </div>
         <div class="deals-table-wrapper">
             <table class="deals-table">
                 <thead><tr><th>Обращение</th><th>Источник</th><th>Менеджер</th><th>Статус</th><th>Дата</th></tr></thead>
                 <tbody>
-                    ${leads.map(lead => `
+                    ${paginated.map(lead => `
                     <tr style="cursor:pointer;" onclick="window.open('https://robotcorporation.bitrix24.ru/crm/lead/details/${lead.id}/','_blank')">
                         <td class="deal-name"><span class="deal-id">#${lead.id}</span>${lead.title||'Без названия'}</td>
                         <td>${lead.source||'—'}</td>
                         <td><div style="display:flex;align-items:center;gap:8px;"><div class="cell-avatar">${(lead.assignedName||'М').charAt(0)}</div><span style="font-size:0.8125rem;">${lead.assignedName||'—'}</span></div></td>
-                        <td><span style="padding:4px 10px;border-radius:4px;font-size:0.6875rem;font-weight:600;background:${(statusColors[lead.status]||'var(--text-tertiary)')}22;color:${statusColors[lead.status]||'var(--text-tertiary)'};">${statusLabels[lead.status]||lead.status}</span></td>
+                        <td><span style="padding:4px 10px;border-radius:4px;font-size:0.6875rem;font-weight:600;background:${(statusColors[lead.status]||'var(--text-tertiary)')}22;color:${statusColors[lead.status]||'var(--text-tertiary)'};">${statusLabels[lead.status]||lead.status||'—'}</span></td>
                         <td style="font-size:0.8125rem;color:var(--text-secondary);">${new Date(lead.dateCreate).toLocaleDateString('ru-RU')}</td>
                     </tr>`).join('')}
                 </tbody>
             </table>
+        </div>
+        <div style="display:flex;justify-content:center;align-items:center;gap:8px;padding:12px;border-top:1px solid var(--border-color);">
+            <button onclick="changeLeadsPage(-1)" style="padding:4px 12px;border:1px solid var(--border-color);border-radius:var(--radius-sm);background:var(--bg-tertiary);cursor:pointer;" ${leadsPage===1?'disabled':''}>←</button>
+            <span style="font-size:0.8125rem;color:var(--text-secondary);">${leadsPage} / ${totalPages||1}</span>
+            <button onclick="changeLeadsPage(1)" style="padding:4px 12px;border:1px solid var(--border-color);border-radius:var(--radius-sm);background:var(--bg-tertiary);cursor:pointer;" ${leadsPage>=totalPages?'disabled':''}>→</button>
         </div>`;
+}
+
+function changeLeadsPage(dir) {
+    const totalPages = Math.ceil(currentLeads.length / leadsPerPage);
+    leadsPage = Math.max(1, Math.min(leadsPage + dir, totalPages));
+    renderLeadsPage();
 }
 
 function loadKnowledgePage() {
@@ -782,6 +872,30 @@ function loadKnowledgePage() {
                 </div>
             </div>`).join('')}
         </div>`;
+}
+
+async function loadSources(status) {
+    try {
+        const today = new Date();
+        const dateFrom = new Date();
+        dateFrom.setDate(today.getDate() - 30);
+
+        let url = `/api/leads?dateFrom=${dateFrom.toISOString().split('T')[0]}&dateTo=${today.toISOString().split('T')[0]}&status=${status}`;
+        if (bitrixDomain) url += `&domain=${encodeURIComponent(bitrixDomain)}`;
+
+        const res = await fetch(url);
+        const data = await res.json();
+
+        const sources = {};
+        (data.leads || []).forEach(lead => {
+            const src = lead.source || 'Другие';
+            sources[src] = (sources[src] || 0) + 1;
+        });
+
+        updateDonutChart(sources);
+    } catch (e) {
+        console.error('Failed to load sources:', e);
+    }
 }
 
 // Scroll Animations
