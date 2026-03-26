@@ -109,6 +109,14 @@ function showSourcesSkeleton() {
     }
     const dt = document.getElementById('donut-total');
     if (dt) dt.textContent = '-';
+
+    // добавляем скелетон на саму круговую диаграмму
+    const donut = document.getElementById('donut-svg');
+    if (donut) {
+        donut.classList.add('skeleton');
+        // удаляем существующие сегменты, чтобы не мешали
+        donut.querySelectorAll('.dyn-segment').forEach(s => s.remove());
+    }
 }
 
 async function loadFunnels() {
@@ -138,23 +146,46 @@ function renderFunnelTabs() {
     }
 }
 
-function switchFunnel(categoryId) {
+async function switchFunnel(categoryId) {
     currentCategory = categoryId;
     showSourcesSkeleton();
-    fetchMainData();
+    await fetchMainData(currentPeriod);
+
+    // после загрузки данных обновляем активную вкладку источников
+    const activeTab = document.querySelector('.sources-card .tab-btn.active');
+    if (activeTab && activeTab.dataset.sources === 'rejected') {
+        updateSourcesRejected(_allDealsData || []);
+    } else {
+        if (_allSourcesData) updateDonutChart(_allSourcesData);
+    }
 }
 
 async function fetchMainData(period = currentPeriod) {
     currentPeriod = period;
+
+    // Показываем скелетоны на всех KPI-элементах
+    document.querySelectorAll('.kpi-value, .kpi-change span, .kpi-change').forEach(el => el.classList.add('skeleton'));
+    showSourcesSkeleton(); // также покажем скелетон на круговой диаграмме
+
     const { dateFromStr, dateToStr } = getPeriodDates(period);
     let url = `/api/stats/dashboard?dateFrom=${dateFromStr}&dateTo=${dateToStr}`;
     if (bitrixDomain) url += `&domain=${encodeURIComponent(bitrixDomain)}`;
     if (currentCategory && currentCategory !== 'all') url += `&categoryId=${encodeURIComponent(currentCategory)}`;
+
     try {
         const res = await fetch(url);
         const data = await res.json();
-        if (!data.error) updateMainUI(data);
-    } catch(e) { console.error('fetchMainData failed:', e); }
+        if (!data.error) {
+            updateMainUI(data);
+            // после обновления UI скелетоны будут удалены внутри updateKPI / updateKPIChange
+        }
+    } catch(e) {
+        console.error('fetchMainData failed:', e);
+        // в случае ошибки всё равно убираем скелетоны, чтобы не висели
+        document.querySelectorAll('.kpi-value, .kpi-change span, .kpi-change').forEach(el => el.classList.remove('skeleton'));
+        const donut = document.getElementById('donut-svg');
+        if (donut) donut.classList.remove('skeleton');
+    }
 }
 
 async function fetchDashboardData(period) { await fetchMainData(period); }
@@ -163,6 +194,7 @@ async function updateManagersWidget(period) {
     dashMgrPeriod = period;
     document.querySelectorAll('.managers-card .mgr-filter-btn').forEach(b => b.classList.toggle('active', b.dataset.period === period));
     const { dateFromStr, dateToStr } = getPeriodDates(period);
+    console.log(`[Менеджеры] период: ${dateFromStr} – ${dateToStr}`); // для отладки
     let url = `/api/stats/dashboard?dateFrom=${dateFromStr}&dateTo=${dateToStr}`;
     if (bitrixDomain) url += `&domain=${encodeURIComponent(bitrixDomain)}`;
     try {
@@ -240,6 +272,10 @@ function updateMainUI(data) {
     }
 
     if (data.funnel) updateFunnelChart(data.funnel);
+
+    // в конце функции updateMainUI добавить:
+    _allSourcesData = data.sources;
+    _allDealsData = data.dealsInProgress;
 }
 
 function updateDashboardUI(data) { updateMainUI(data); }
@@ -272,6 +308,9 @@ function updateSourcesRejected(deals) {
 }
 
 function updateDonutChart(sources) {
+    const donut = document.getElementById('donut-svg');
+    if (donut) donut.classList.remove('skeleton');
+
     const total = Object.values(sources).reduce((a,b)=>a+b,0);
     if (total === 0) return;
     const el = document.getElementById('donut-total');
@@ -281,25 +320,28 @@ function updateDonutChart(sources) {
     const entries = Object.entries(sources);
     const circumference = 2 * Math.PI * 45;
 
-    const svg = document.getElementById('donut-svg');
-    if (svg) {
-        svg.querySelectorAll('.dyn-segment').forEach(s => s.remove());
-        let offset = 0;
-        entries.forEach(([name, count], idx) => {
-            const pct = count / total;
-            const dashLen = pct * circumference;
-            const circle = document.createElementNS('http://www.w3.org/2000/svg', 'circle');
-            circle.setAttribute('class', 'donut-segment dyn-segment');
-            circle.setAttribute('cx', '60'); circle.setAttribute('cy', '60'); circle.setAttribute('r', '45');
-            circle.setAttribute('stroke', colors[idx % colors.length]);
-            circle.setAttribute('stroke-dasharray', `${dashLen} ${circumference - dashLen}`);
-            circle.setAttribute('stroke-dashoffset', `-${offset}`);
-            circle.setAttribute('fill', 'none'); circle.setAttribute('stroke-width', '20');
-            const hole = svg.querySelector('.donut-hole');
-            if (hole) svg.insertBefore(circle, hole); else svg.appendChild(circle);
-            offset += dashLen;
-        });
-    }
+    // очищаем предыдущие сегменты
+    donut.querySelectorAll('.dyn-segment').forEach(s => s.remove());
+
+    let offset = 0;
+    entries.forEach(([name, count], idx) => {
+        const pct = count / total;
+        const dashLen = pct * circumference;
+        const circle = document.createElementNS('http://www.w3.org/2000/svg', 'circle');
+        circle.setAttribute('class', 'donut-segment dyn-segment');
+        circle.setAttribute('cx', '60');
+        circle.setAttribute('cy', '60');
+        circle.setAttribute('r', '45');
+        circle.setAttribute('stroke', colors[idx % colors.length]);
+        circle.setAttribute('stroke-dasharray', `${dashLen} ${circumference - dashLen}`);
+        circle.setAttribute('stroke-dashoffset', `-${offset}`);
+        circle.setAttribute('fill', 'none');
+        circle.setAttribute('stroke-width', '20');
+        const hole = donut.querySelector('.donut-hole');
+        if (hole) donut.insertBefore(circle, hole);
+        else donut.appendChild(circle);
+        offset += dashLen;
+    });
 
     const legend = document.getElementById('sources-legend');
     if (legend) {
@@ -770,14 +812,21 @@ function updateKPI(selector, value, prefix='', suffix='') {
 }
 
 function updateKPIChange(cardSelector, changeValue) {
-    const card=document.querySelector(cardSelector);
+    const card = document.querySelector(cardSelector);
     if (!card) return;
-    const el=card.querySelector('.kpi-change');
+    const el = card.querySelector('.kpi-change');
     if (!el) return;
-    if (changeValue===null||changeValue===undefined) { el.classList.remove('skeleton'); el.textContent='— нет данных'; el.className='kpi-change neutral'; return; }
-    const sign=changeValue>=0?'+':'', arrow=changeValue>=0?'↑':'↓';
-    el.textContent=`${arrow} ${sign}${changeValue}% к прошлому периоду`;
-    el.className=`kpi-change ${changeValue>=0?'positive':'negative'}`;
+    el.classList.remove('skeleton'); // убираем скелетон
+
+    if (changeValue === null || changeValue === undefined) {
+        el.textContent = '— нет данных';
+        el.className = 'kpi-change neutral';
+        return;
+    }
+    const sign = changeValue >= 0 ? '+' : '';
+    const arrow = changeValue >= 0 ? '↑' : '↓';
+    el.textContent = `${arrow} ${sign}${changeValue}% к прошлому периоду`;
+    el.className = `kpi-change ${changeValue >= 0 ? 'positive' : 'negative'}`;
 }
 
 function initRefreshButton() {

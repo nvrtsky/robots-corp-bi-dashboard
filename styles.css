@@ -1803,3 +1803,35 @@ body.bitrix-mode .app {
     border-color: var(--accent-primary);
     color: white;
 }
+
+/* Скелетон для SVG-круга */
+#donut-svg.skeleton {
+    background: linear-gradient(90deg, var(--bg-tertiary) 25%, var(--border-color) 50%, var(--bg-tertiary) 75%);
+    background-size: 200% 100%;
+    animation: skeleton-shimmer 1.5s infinite;
+    border-radius: 50%;
+    display: inline-block;
+    width: 160px;
+    height: 160px;
+}
+
+/* Исправление для съезжания виджетов при смене воронки */
+.funnel-card,
+.sources-card,
+.managers-card,
+.deals-card {
+    min-width: 0; /* позволяет сжиматься при переполнении */
+    overflow-x: auto; /* при необходимости – скролл */
+}
+
+/* Обеспечиваем, чтобы контейнеры не ломали сетку */
+.charts-row,
+.bottom-row {
+    width: 100%;
+}
+
+/* Для длинных названий этапов в воронке */
+.stage-name {
+    word-break: break-word;
+    white-space: normal;
+}
