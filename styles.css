@@ -1835,3 +1835,29 @@ body.bitrix-mode .app {
     word-break: break-word;
     white-space: normal;
 }
+
+/* Скелетон для воронки продаж */
+.funnel-bar.skeleton {
+    background: linear-gradient(90deg, var(--bg-tertiary) 25%, var(--border-color) 50%, var(--bg-tertiary) 75%);
+    background-size: 200% 100%;
+    animation: skeleton-shimmer 1.5s infinite;
+    color: transparent;
+}
+.funnel-value.skeleton {
+    background: linear-gradient(90deg, var(--bg-tertiary) 25%, var(--border-color) 50%, var(--bg-tertiary) 75%);
+    background-size: 200% 100%;
+    animation: skeleton-shimmer 1.5s infinite;
+    color: transparent;
+    display: inline-block;
+    width: 40px;
+}
+.stage-name.skeleton, .stage-percent.skeleton {
+    background: linear-gradient(90deg, var(--bg-tertiary) 25%, var(--border-color) 50%, var(--bg-tertiary) 75%);
+    background-size: 200% 100%;
+    animation: skeleton-shimmer 1.5s infinite;
+    color: transparent;
+    display: inline-block;
+    width: 80px;
+    height: 14px;
+    border-radius: 4px;
+}

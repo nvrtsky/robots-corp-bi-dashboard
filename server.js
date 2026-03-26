@@ -11,6 +11,30 @@ app.use(express.json());
 app.use(express.urlencoded({ extended: false }));
 app.use(express.static(__dirname));
 
+// Функция для получения всех записей с пагинацией
+async function getAll(client, method, params = {}) {
+    let allItems = [];
+    let start = 0;
+    let total = null;
+    const maxItems = 5000; // защита от бесконечного цикла
+    
+    while (true) {
+        const response = await client.call(method, { ...params, start });
+        const items = response.result || [];
+        allItems.push(...items);
+        total = response.total;
+        
+        // Если нет следующей страницы или достигли конца
+        if (!response.next && (total === undefined || allItems.length >= total)) break;
+        if (allItems.length >= maxItems) break;
+        
+        // Переход к следующей странице
+        start = response.next || allItems.length;
+        if (start >= total) break;
+    }
+    return { result: allItems, total: total || allItems.length };
+}
+
 const serveIndex = (req, res) => res.sendFile(path.join(__dirname, 'index.html'));
 app.get('/', serveIndex);
 app.post('/', serveIndex);
@@ -86,39 +110,31 @@ app.get('/api/stats/dashboard', async (req, res) => {
         const stageListId = categoryId !== undefined && categoryId !== 'all' ? parseInt(categoryId) : 0;
 
         const [dealsWon, leads, dealsInProgress, allDeals, stages, sourceStatuses, dealCategories, prevDealsWon, prevLeads] = await Promise.all([
-            // Выручка: выигранные сделки С ФИЛЬТРОМ по дате закрытия
-            client.call('crm.deal.list', {
-                filter: {
-                    SEMANTIC: 'S',
-                    ...wonDateFilter,  // ← КЛЮЧЕВОЕ ИСПРАВЛЕНИЕ: фильтр по дате
-                    ...categoryFilter
-                },
+            // Выручка: выигранные сделки с пагинацией
+            getAll(client, 'crm.deal.list', {
+                filter: { SEMANTIC: 'S', ...wonDateFilter, ...categoryFilter },
                 select: ['OPPORTUNITY', 'CURRENCY_ID', 'ASSIGNED_BY_ID']
             }),
-            client.call('crm.lead.list', {
+            getAll(client, 'crm.lead.list', {
                 filter: { ...dateFilter },
                 select: ['ID', 'SOURCE_ID']
             }),
-            client.call('crm.deal.list', {
-                filter: {
-                    '!SEMANTIC': ['S', 'F'],
-                    ...dateFilter,
-                    ...categoryFilter
-                },
+            getAll(client, 'crm.deal.list', {
+                filter: { '!SEMANTIC': ['S', 'F'], ...dateFilter, ...categoryFilter },
                 select: ['ID', 'TITLE', 'OPPORTUNITY', 'ASSIGNED_BY_ID', 'DATE_CREATE', 'STAGE_ID', 'CATEGORY_ID']
             }),
-            client.call('crm.deal.list', {
+            getAll(client, 'crm.deal.list', {
                 filter: { ...dateFilter, ...categoryFilter },
                 select: ['ID', 'STAGE_ID', 'ASSIGNED_BY_ID', 'OPPORTUNITY', 'CATEGORY_ID']
             }),
             client.call('crm.dealcategory.stage.list', { id: stageListId }),
             client.call('crm.status.list', { filter: { ENTITY_ID: 'SOURCE' } }),
             client.call('crm.dealcategory.list'),
-            client.call('crm.deal.list', {
+            getAll(client, 'crm.deal.list', {
                 filter: { SEMANTIC: 'S', ...prevWonDateFilter, ...categoryFilter },
                 select: ['OPPORTUNITY']
             }),
-            client.call('crm.lead.list', {
+            getAll(client, 'crm.lead.list', {
                 filter: { ...prevDateFilter },
                 select: ['ID']
             })
@@ -202,12 +218,12 @@ app.get('/api/stats/dashboard', async (req, res) => {
             return { ...deal, daysInProgress, stageName: stageMap[deal.STAGE_ID] || deal.STAGE_ID };
         });
 
-        const totalDeals = allDeals.total || allDeals.result.length;
+        const totalDeals = allDeals.total;
         const wonDeals = dealsWon.result.length;
         const conversionRate = totalDeals > 0 ? ((wonDeals / totalDeals) * 100).toFixed(1) : 0;
 
         const prevRevenue = prevDealsWon.result.reduce((sum, d) => sum + parseFloat(d.OPPORTUNITY || 0), 0);
-        const prevLeadsCount = prevLeads.total || prevLeads.result.length;
+        const prevLeadsCount = prevLeads.total;
 
         const calcChange = (current, previous) => {
             if (previous === 0) return null;
@@ -216,14 +232,14 @@ app.get('/api/stats/dashboard', async (req, res) => {
 
         const changes = {
             revenue: calcChange(revenue, prevRevenue),
-            leadsCount: calcChange(leads.total || leads.result.length, prevLeadsCount),
+            leadsCount: calcChange(leads.total, prevLeadsCount),
             conversionRate: null
         };
 
         res.json({
             revenue,
-            leadsCount: leads.total || leads.result.length,
-            dealsInProgressCount: dealsInProgress.total || dealsInProgress.result.length,
+            leadsCount: leads.total,
+            dealsInProgressCount: dealsInProgress.total,
             dealsInProgress: dealsWithDuration,
             sources,
             funnel: funnelData,
@@ -236,9 +252,8 @@ app.get('/api/stats/dashboard', async (req, res) => {
 
     } catch (e) {
         console.error('[API Error]', e.message);
-        const mockData = require('./mock-data');
-        const data = mockData.generateDashboardData(req.query.categoryId);
-        res.json({ ...data, isDemo: true });
+        console.error('[API Error Stack]', e.stack);
+        res.status(500).json({ error: e.message });
     }
 });
 
@@ -252,8 +267,8 @@ app.get('/api/funnels', async (req, res) => {
         }
         res.json({ funnels });
     } catch (e) {
-        const mockData = require('./mock-data');
-        res.json(mockData.getFunnels());
+        console.error('[API Funnels Error]', e.message);
+        res.status(500).json({ error: e.message });
     }
 });
 
@@ -268,7 +283,7 @@ app.get('/api/leads', async (req, res) => {
         if (status === 'accepted') statusFilter.STATUS_ID = ['IN_PROCESS', 'CONVERTED'];
         else if (status === 'rejected') statusFilter.STATUS_ID = ['JUNK'];
 
-        const leads = await client.call('crm.lead.list', {
+        const leads = await getAll(client, 'crm.lead.list', {
             filter: { ...dateFilter, ...statusFilter },
             select: ['ID', 'TITLE', 'NAME', 'LAST_NAME', 'SOURCE_ID', 'STATUS_ID', 'DATE_CREATE', 'ASSIGNED_BY_ID']
         });
@@ -292,17 +307,10 @@ app.get('/api/leads', async (req, res) => {
             assignedId: lead.ASSIGNED_BY_ID
         }));
 
-        res.json({ leads: result, total: leads.total || result.length });
+        res.json({ leads: result, total: leads.total });
     } catch (e) {
-        const mockLeads = Array.from({ length: 20 }, (_, i) => ({
-            id: String(2000 + i), title: `Обращение #${2000 + i}`,
-            source: ['Сайт', 'Реклама', 'Звонки', 'Рекомендации'][i % 4],
-            status: i % 5 === 0 ? 'JUNK' : i % 3 === 0 ? 'CONVERTED' : 'IN_PROCESS',
-            dateCreate: new Date(Date.now() - i * 86400000).toISOString(),
-            assignedName: ['Алексей Петров', 'Мария Козлова', 'Дмитрий Волков'][i % 3],
-            assignedId: String(i % 3 + 1)
-        }));
-        res.json({ leads: mockLeads, total: mockLeads.length, isDemo: true });
+        console.error('[API Leads Error]', e.message);
+        res.status(500).json({ error: e.message });
     }
 });
 
