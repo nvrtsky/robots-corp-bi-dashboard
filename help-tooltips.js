@@ -14,11 +14,11 @@ const helpTexts = {
     },
     deals: {
         title: 'Сделки в работе',
-        text: 'Количество активных сделок (не закрытых и не проигранных). Цветовая индикация: 🔴 горячие (близки к закрытию), 🟡 в процессе, ⚪ стагнирующие (без активности).'
+        text: 'Количество активных сделок (не закрытых и не проигранных). Цветовая индикация: 🔴 горячие (< 7 дней), 🟡 в процессе (7–30 дней), ⚪ стагнирующие (> 30 дней).'
     },
     funnel: {
         title: 'Воронка продаж',
-        text: 'Визуализация распределения сделок по этапам выбранной воронки. Ширина полосы пропорциональна количеству сделок на этапе. Проценты между этапами показывают конверсию перехода.'
+        text: 'Визуализация распределения сделок по этапам выбранной воронки. Ширина полосы пропорциональна количеству сделок на этапе.'
     },
     sources: {
         title: 'Источники обращений',
@@ -26,7 +26,7 @@ const helpTexts = {
     },
     managers: {
         title: 'Эффективность менеджеров',
-        text: 'Рейтинг менеджеров отдела продаж. По умолчанию сортировка по конверсии. Выручка менеджера = сумма его выигранных сделок за период.'
+        text: 'Рейтинг менеджеров отдела продаж по выигранным сделкам. Выручка менеджера = сумма его выигранных сделок за период. Фильтр периода работает независимо от основного фильтра.'
     },
     dealsTable: {
         title: 'Сделки в работе',
@@ -34,11 +34,10 @@ const helpTexts = {
     },
     channels: {
         title: 'Эффективность каналов',
-        text: 'Сравнительный анализ маркетинговых каналов. "Конверсия" — процент лидов, ставших сделками. "Лиды" — абсолютное число обращений из канала.'
+        text: 'Сравнительный анализ маркетинговых каналов. "Конверсия" — % лидов, ставших сделками. "Лиды" — абсолютное число обращений. Фильтр периода работает независимо.'
     }
 };
 
-// Активный popover
 let activePopover = null;
 
 function createHelpButton(widgetKey) {
@@ -46,7 +45,6 @@ function createHelpButton(widgetKey) {
     btn.className = 'help-btn';
     btn.innerHTML = '?';
     btn.setAttribute('aria-label', 'Подсказка');
-
     btn.addEventListener('click', (e) => {
         e.stopPropagation();
         const existing = document.querySelector('.help-popover');
@@ -57,14 +55,12 @@ function createHelpButton(widgetKey) {
         }
         showHelpPopover(btn, widgetKey);
     });
-
     return btn;
 }
 
 function showHelpPopover(triggerBtn, widgetKey) {
     const data = helpTexts[widgetKey];
     if (!data) return;
-
     const popover = document.createElement('div');
     popover.className = 'help-popover';
     popover.dataset.key = widgetKey;
@@ -74,37 +70,25 @@ function showHelpPopover(triggerBtn, widgetKey) {
         <div class="help-popover-title">${data.title}</div>
         <div class="help-popover-text">${data.text}</div>
     `;
-
     document.body.appendChild(popover);
     activePopover = popover;
-
-    // Позиционирование
     const btnRect = triggerBtn.getBoundingClientRect();
     const popoverWidth = 320;
     let left = btnRect.right - popoverWidth;
     if (left < 8) left = btnRect.left;
     const top = btnRect.bottom + 8 + window.scrollY;
-
     popover.style.left = left + 'px';
     popover.style.top = top + 'px';
-
-    // Закрытие
     popover.querySelector('.help-popover-close').addEventListener('click', () => {
         popover.remove();
         activePopover = null;
     });
-
-    // Анимация
     setTimeout(() => popover.classList.add('visible'), 10);
 }
 
-// Закрытие по клику вне
 document.addEventListener('click', () => {
     const popover = document.querySelector('.help-popover');
-    if (popover) {
-        popover.remove();
-        activePopover = null;
-    }
+    if (popover) { popover.remove(); activePopover = null; }
 });
 
 function initHelpTooltips() {
@@ -115,9 +99,9 @@ function initHelpTooltips() {
         { selector: '.kpi-card.deals', key: 'deals', corner: true },
         { selector: '.funnel-card .chart-header', key: 'funnel' },
         { selector: '.sources-card .chart-header', key: 'sources' },
-        { selector: '.managers-card .chart-header', key: 'managers' },
+        { selector: '#dash-managers-help-anchor', key: 'managers', corner: false },
         { selector: '.deals-card .chart-header', key: 'dealsTable' },
-        { selector: '.channels-card .chart-header', key: 'channels' },
+        { selector: '#channels-help-anchor', key: 'channels', corner: false },
     ];
 
     widgets.forEach(({ selector, key, corner }) => {
@@ -129,7 +113,6 @@ function initHelpTooltips() {
             btn.style.top = '12px';
             btn.style.right = '12px';
             btn.style.margin = '0';
-            // KPI карточка должна быть position: relative — уже есть в CSS
         }
         el.appendChild(btn);
     });

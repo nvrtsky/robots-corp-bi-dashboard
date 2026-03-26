@@ -1,6 +1,5 @@
 <!DOCTYPE html>
 <html lang="ru">
-
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
@@ -11,778 +10,287 @@
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet">
     <link rel="stylesheet" href="styles.css">
     <link rel="stylesheet" href="onboarding.css">
-    <!-- Bitrix24 JS SDK -->
+    <style>
+        .top-nav { position:fixed;top:0;left:var(--sidebar-width);right:0;height:64px;background:var(--bg-card);border-bottom:1px solid var(--border-color);display:flex;align-items:center;justify-content:space-between;padding:0 var(--spacing-xl);z-index:50;gap:var(--spacing-lg); }
+        body.bitrix-mode .top-nav { left:0; }
+        .top-nav-left { display:flex;flex-direction:column;justify-content:center;flex-shrink:0; }
+        .top-nav-title { font-size:1rem;font-weight:700;color:var(--text-primary);line-height:1.2; }
+        .top-nav-subtitle { font-size:0.75rem;color:var(--text-secondary); }
+        .top-nav-right { display:flex;align-items:center;gap:var(--spacing-md);flex-wrap:nowrap; }
+        .main-content { padding-top:80px !important;margin-left:var(--sidebar-width); }
+        body.bitrix-mode .main-content { margin-left:0; }
+        .chn-filter-btn { padding:var(--spacing-xs) var(--spacing-sm);border:1px solid var(--border-color);background:transparent;color:var(--text-secondary);border-radius:var(--radius-sm);font-size:0.75rem;cursor:pointer;transition:all var(--transition-fast); }
+        .chn-filter-btn.active { background:var(--accent-primary);border-color:var(--accent-primary);color:white; }
+        .page-mgr-filter-btn, .page-leads-filter-btn { padding:var(--spacing-sm) var(--spacing-md);border:none;background:transparent;color:var(--text-secondary);border-radius:var(--radius-sm);cursor:pointer;font-size:0.8125rem;font-weight:500;transition:all var(--transition-fast); }
+        .page-mgr-filter-btn.active, .page-leads-filter-btn.active { background:linear-gradient(135deg,var(--accent-primary),var(--accent-secondary));color:white;box-shadow:0 2px 10px var(--accent-primary-glow); }
+    </style>
     <script src="https://api.bitrix24.com/api/v1/"></script>
 </head>
-
 <body>
-    <div class="app">
-        <!-- Sidebar -->
-        <aside class="sidebar">
-            <div class="sidebar-header">
-                <div class="logo">
-                    <div class="logo-icon">
-                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                            <path d="M3 3v18h18" />
-                            <path d="M18 9l-5-5-4 4-3-3" />
-                        </svg>
-                    </div>
-                    <span class="logo-text">BI Analytics</span>
-                </div>
+<div class="app">
+    <aside class="sidebar">
+        <div class="sidebar-header">
+            <div class="logo">
+                <div class="logo-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 3v18h18"/><path d="M18 9l-5-5-4 4-3-3"/></svg></div>
+                <span class="logo-text">BI Analytics</span>
             </div>
-            <nav class="sidebar-nav">
-                <a href="#" class="nav-item active" data-page="dashboard">
-                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                        <rect x="3" y="3" width="7" height="7" rx="1" />
-                        <rect x="14" y="3" width="7" height="7" rx="1" />
-                        <rect x="3" y="14" width="7" height="7" rx="1" />
-                        <rect x="14" y="14" width="7" height="7" rx="1" />
-                    </svg>
-                    <span>Дашборд</span>
-                </a>
-                <a href="#" class="nav-item" data-page="managers">
-                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                        <path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2" />
-                        <circle cx="9" cy="7" r="4" />
-                        <path d="M23 21v-2a4 4 0 0 0-3-3.87" />
-                        <path d="M16 3.13a4 4 0 0 1 0 7.75" />
-                    </svg>
-                    <span>Менеджеры</span>
-                </a>
-                <a href="#" class="nav-item" data-page="leads">
-                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                        <path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z" />
-                    </svg>
-                    <span>Обращения</span>
-                </a>
-                <a href="#" class="nav-item" data-page="knowledge">
-                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                        <path d="M4 19.5A2.5 2.5 0 0 1 6.5 17H20"/>
-                        <path d="M6.5 2H20v20H6.5A2.5 2.5 0 0 1 4 19.5v-15A2.5 2.5 0 0 1 6.5 2z"/>
-                    </svg>
-                    <span>База знаний</span>
-                </a>
-                <a href="#" class="nav-item" data-page="settings">
-                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                        <circle cx="12" cy="12" r="3" />
-                        <path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-2 2 2 2 0 0 1-2-2v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1-2-2 2 2 0 0 1 2-2h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 2-2 2 2 0 0 1 2 2v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 2 2 2 2 0 0 1-2 2h-.09a1.65 1.65 0 0 0-1.51 1z" />
-                    </svg>
-                    <span>Настройки</span>
-                </a>
-            </nav>
-            <div class="sidebar-tour-btn">
-                <button onclick="localStorage.removeItem('onboarding_completed'); startOnboarding();" class="tour-restart-btn">
-                    🎓 Пройти обучение
+        </div>
+        <nav class="sidebar-nav">
+            <a href="#" class="nav-item active" data-page="dashboard">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="7" height="7" rx="1"/><rect x="14" y="3" width="7" height="7" rx="1"/><rect x="3" y="14" width="7" height="7" rx="1"/><rect x="14" y="14" width="7" height="7" rx="1"/></svg>
+                <span>Дашборд</span>
+            </a>
+            <a href="#" class="nav-item" data-page="managers">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M23 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/></svg>
+                <span>Менеджеры</span>
+            </a>
+            <a href="#" class="nav-item" data-page="leads">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/></svg>
+                <span>Обращения</span>
+            </a>
+            <a href="#" class="nav-item" data-page="knowledge">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M4 19.5A2.5 2.5 0 0 1 6.5 17H20"/><path d="M6.5 2H20v20H6.5A2.5 2.5 0 0 1 4 19.5v-15A2.5 2.5 0 0 1 6.5 2z"/></svg>
+                <span>База знаний</span>
+            </a>
+            <a href="#" class="nav-item" data-page="settings">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83-2.83l.06-.06A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9"/></svg>
+                <span>Настройки</span>
+            </a>
+        </nav>
+        <div class="sidebar-tour-btn">
+            <button onclick="restartOnboarding()" class="tour-restart-btn">🎓 Пройти обучение</button>
+        </div>
+        <div class="sidebar-footer">
+            <div class="user-profile">
+                <div class="user-avatar">АД</div>
+                <div class="user-info"><span class="user-name">Администратор</span><span class="user-role">CRM Manager</span></div>
+            </div>
+        </div>
+    </aside>
+
+    <!-- Top Navigation Bar -->
+    <div class="top-nav">
+        <div class="top-nav-left">
+            <span class="top-nav-title" id="top-nav-title">Аналитический дашборд</span>
+            <span class="top-nav-subtitle" id="top-nav-subtitle">Ключевые показатели эффективности в реальном времени</span>
+        </div>
+        <div class="top-nav-right">
+            <!-- Dashboard controls -->
+            <div id="dashboard-nav-controls" style="display:flex;align-items:center;gap:12px;">
+                <div class="date-filter">
+                    <button class="filter-btn main-filter-btn" data-period="day">День</button>
+                    <button class="filter-btn main-filter-btn" data-period="week">Неделя</button>
+                    <button class="filter-btn main-filter-btn active" data-period="month">Месяц</button>
+                </div>
+                <div class="date-range">
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="width:16px;height:16px;"><rect x="3" y="4" width="18" height="18" rx="2" ry="2"/><line x1="16" y1="2" x2="16" y2="6"/><line x1="8" y1="2" x2="8" y2="6"/><line x1="3" y1="10" x2="21" y2="10"/></svg>
+                    <span id="date-range-text">—</span>
+                </div>
+                <button class="refresh-btn">
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="23 4 23 10 17 10"/><polyline points="1 20 1 14 7 14"/><path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15"/></svg>
                 </button>
             </div>
-            <div class="sidebar-footer">
-                <div class="user-profile">
-                    <div class="user-avatar">АД</div>
-                    <div class="user-info">
-                        <span class="user-name">Администратор</span>
-                        <span class="user-role">CRM Manager</span>
-                    </div>
+            <!-- Managers page controls -->
+            <div id="managers-nav-controls" style="display:none;align-items:center;gap:12px;">
+                <div class="date-filter">
+                    <button class="page-mgr-filter-btn" data-period="day">День</button>
+                    <button class="page-mgr-filter-btn" data-period="week">Неделя</button>
+                    <button class="page-mgr-filter-btn active" data-period="month">Месяц</button>
                 </div>
             </div>
-        </aside>
-
-        <!-- Main Content -->
-        <main class="main-content">
-            <!-- Header -->
-            <header class="header">
-                <div class="header-left">
-                    <h1 class="page-title">Аналитический дашборд</h1>
-                    <p class="page-subtitle">Ключевые показатели эффективности в реальном времени</p>
-                </div>
-                <div class="header-right">
-                    <div class="date-filter">
-                        <button class="filter-btn main-filter-btn" data-period="day">День</button>
-                        <button class="filter-btn main-filter-btn" data-period="week">Неделя</button>
-                        <button class="filter-btn main-filter-btn active" data-period="month">Месяц</button>
-                    </div>
-                    <div class="date-range">
-                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                            <rect x="3" y="4" width="18" height="18" rx="2" ry="2" />
-                            <line x1="16" y1="2" x2="16" y2="6" />
-                            <line x1="8" y1="2" x2="8" y2="6" />
-                            <line x1="3" y1="10" x2="21" y2="10" />
-                        </svg>
-                        <span>21 — 28 янв 2026</span>
-                    </div>
-                    <button class="refresh-btn">
-                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                            <polyline points="23 4 23 10 17 10" />
-                            <polyline points="1 20 1 14 7 14" />
-                            <path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15" />
-                        </svg>
-                    </button>
-                </div>
-            </header>
-
-            <!-- KPI Cards -->
-            <section class="kpi-grid">
-                <div class="kpi-card revenue">
-                    <div class="kpi-icon">
-                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                            <line x1="12" y1="1" x2="12" y2="23" />
-                            <path d="M17 5H9.5a3.5 3.5 0 0 0 0 7h5a3.5 3.5 0 0 1 0 7H6" />
-                        </svg>
-                    </div>
-                    <div class="kpi-content">
-                        <span class="kpi-label">Выручка</span>
-                        <span class="kpi-value">-</span>
-                        <div class="kpi-change positive">
-                            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                                <polyline points="23 6 13.5 15.5 8.5 10.5 1 18" />
-                                <polyline points="17 6 23 6 23 12" />
-                            </svg>
-                            <span>+18.2% к прошлой неделе</span>
-                        </div>
-                    </div>
-                    <div class="kpi-sparkline">
-                        <svg viewBox="0 0 100 40" preserveAspectRatio="none">
-                            <defs>
-                                <linearGradient id="revenueGradient" x1="0%" y1="0%" x2="0%" y2="100%">
-                                    <stop offset="0%" stop-color="rgba(16, 185, 129, 0.3)" />
-                                    <stop offset="100%" stop-color="rgba(16, 185, 129, 0)" />
-                                </linearGradient>
-                            </defs>
-                            <path d="M0,35 L15,28 L30,32 L45,20 L60,25 L75,12 L100,5 L100,40 L0,40 Z"
-                                fill="url(#revenueGradient)" />
-                            <polyline points="0,35 15,28 30,32 45,20 60,25 75,12 100,5" fill="none" stroke="#10b981"
-                                stroke-width="2" />
-                        </svg>
-                    </div>
-                </div>
-
-                <div class="kpi-card leads">
-                    <div class="kpi-icon">
-                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                            <path d="M16 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2" />
-                            <circle cx="8.5" cy="7" r="4" />
-                            <polyline points="17 11 19 13 23 9" />
-                        </svg>
-                    </div>
-                    <div class="kpi-content">
-                        <span class="kpi-label">Новые лиды</span>
-                        <span class="kpi-value">-</span>
-                        <div class="kpi-change positive">
-                            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                                <polyline points="23 6 13.5 15.5 8.5 10.5 1 18" />
-                                <polyline points="17 6 23 6 23 12" />
-                            </svg>
-                            <span>-</span>
-                        </div>
-                    </div>
-                    <div class="kpi-sparkline">
-                        <svg viewBox="0 0 100 40" preserveAspectRatio="none">
-                            <defs>
-                                <linearGradient id="leadsGradient" x1="0%" y1="0%" x2="0%" y2="100%">
-                                    <stop offset="0%" stop-color="rgba(59, 130, 246, 0.3)" />
-                                    <stop offset="100%" stop-color="rgba(59, 130, 246, 0)" />
-                                </linearGradient>
-                            </defs>
-                            <path d="M0,30 L20,25 L40,28 L60,15 L80,18 L100,8 L100,40 L0,40 Z"
-                                fill="url(#leadsGradient)" />
-                            <polyline points="0,30 20,25 40,28 60,15 80,18 100,8" fill="none" stroke="#3b82f6"
-                                stroke-width="2" />
-                        </svg>
-                    </div>
-                </div>
-
-                <div class="kpi-card conversion">
-                    <div class="kpi-icon">
-                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                            <path d="M22 11.08V12a10 10 0 1 1-5.93-9.14" />
-                            <polyline points="22 4 12 14.01 9 11.01" />
-                        </svg>
-                    </div>
-                    <div class="kpi-content">
-                        <span class="kpi-label">Конверсия</span>
-                        <span class="kpi-value">-</span>
-                        <div class="kpi-change positive">
-                            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                                <polyline points="23 6 13.5 15.5 8.5 10.5 1 18" />
-                                <polyline points="17 6 23 6 23 12" />
-                            </svg>
-                            <span>-</span>
-                        </div>
-                    </div>
-                    <div class="kpi-progress">
-                        <div class="progress-ring">
-                            <svg viewBox="0 0 36 36">
-                                <path class="progress-bg" d="M18 2.0845
-                                    a 15.9155 15.9155 0 0 1 0 31.831
-                                    a 15.9155 15.9155 0 0 1 0 -31.831" />
-                                <path class="progress-fill" stroke-dasharray="24.8, 100" d="M18 2.0845
-                                    a 15.9155 15.9155 0 0 1 0 31.831
-                                    a 15.9155 15.9155 0 0 1 0 -31.831" />
-                            </svg>
-                        </div>
-                    </div>
-                </div>
-
-                <div class="kpi-card deals">
-                    <div class="kpi-icon">
-                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                            <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z" />
-                            <polyline points="14 2 14 8 20 8" />
-                            <line x1="16" y1="13" x2="8" y2="13" />
-                            <line x1="16" y1="17" x2="8" y2="17" />
-                            <polyline points="10 9 9 9 8 9" />
-                        </svg>
-                    </div>
-                    <div class="kpi-content">
-                        <span class="kpi-label">Сделок в работе</span>
-                        <span class="kpi-value">-</span>
-                        <div class="kpi-change neutral">
-                            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                                <line x1="5" y1="12" x2="19" y2="12" />
-                            </svg>
-                            <span>Без изменений</span>
-                        </div>
-                    </div>
-                    <div class="kpi-indicator">
-                        <div class="indicator-item">
-                            <span class="indicator-dot hot"></span>
-                            <span>- горячих</span>
-                        </div>
-                        <div class="indicator-item">
-                            <span class="indicator-dot warm"></span>
-                            <span>- в процессе</span>
-                        </div>
-                        <div class="indicator-item">
-                            <span class="indicator-dot cold"></span>
-                            <span>- стагнирующих</span>
-                        </div>
-                    </div>
-                </div>
-            </section>
-
-            <!-- Charts Row -->
-            <section class="charts-row">
-                <!-- Sales Funnel -->
-                <div class="chart-card funnel-card">
-                    <div class="chart-header">
-                        <h3>Воронка продаж</h3>
-                        <!-- Funnel dropdown selector -->
-                        <select id="funnel-select" class="funnel-select">
-                            <option value="all">Все воронки</option>
-                            <!-- Options loaded dynamically -->
-                        </select>
-                    </div>
-                    <div class="funnel-container">
-                        <div class="funnel-stage stage-1">
-                            <div class="funnel-bar" style="--width: 100%">
-                                <span class="funnel-value">847</span>
-                            </div>
-                            <div class="funnel-info">
-                                <span class="stage-name">Новые обращения</span>
-                                <span class="stage-percent">100%</span>
-                            </div>
-                        </div>
-                        <div class="funnel-connector">
-                            <span class="conversion-rate">→ 68%</span>
-                        </div>
-                        <div class="funnel-stage stage-2">
-                            <div class="funnel-bar" style="--width: 68%">
-                                <span class="funnel-value">576</span>
-                            </div>
-                            <div class="funnel-info">
-                                <span class="stage-name">Квалифицированные</span>
-                                <span class="stage-percent">68%</span>
-                            </div>
-                        </div>
-                        <div class="funnel-connector">
-                            <span class="conversion-rate">→ 52%</span>
-                        </div>
-                        <div class="funnel-stage stage-3">
-                            <div class="funnel-bar" style="--width: 35%">
-                                <span class="funnel-value">299</span>
-                            </div>
-                            <div class="funnel-info">
-                                <span class="stage-name">Переговоры</span>
-                                <span class="stage-percent">35%</span>
-                            </div>
-                        </div>
-                        <div class="funnel-connector">
-                            <span class="conversion-rate">→ 70%</span>
-                        </div>
-                        <div class="funnel-stage stage-4">
-                            <div class="funnel-bar" style="--width: 25%">
-                                <span class="funnel-value">210</span>
-                            </div>
-                            <div class="funnel-info">
-                                <span class="stage-name">Успешные сделки</span>
-                                <span class="stage-percent">24.8%</span>
-                            </div>
-                        </div>
-                    </div>
-                </div>
-
-                <!-- Lead Sources -->
-                <div class="chart-card sources-card">
-                    <div class="chart-header">
-                        <h3>Источники обращений</h3>
-                        <div class="chart-tabs">
-                            <button class="tab-btn active">Принятые</button>
-                            <button class="tab-btn">Непринятые</button>
-                        </div>
-                    </div>
-                    <div class="sources-container">
-                        <div class="sources-chart">
-                            <svg viewBox="0 0 120 120" class="donut-chart">
-                                <circle class="donut-segment website" cx="60" cy="60" r="45"
-                                    stroke-dasharray="84.82 198.92" stroke-dashoffset="0" />
-                                <circle class="donut-segment social" cx="60" cy="60" r="45"
-                                    stroke-dasharray="56.55 226.19" stroke-dashoffset="-84.82" />
-                                <circle class="donut-segment referral" cx="60" cy="60" r="45"
-                                    stroke-dasharray="42.41 240.33" stroke-dashoffset="-141.37" />
-                                <circle class="donut-segment direct" cx="60" cy="60" r="45"
-                                    stroke-dasharray="28.27 254.47" stroke-dashoffset="-183.78" />
-                                <circle class="donut-segment other" cx="60" cy="60" r="45"
-                                    stroke-dasharray="70.69 212.06" stroke-dashoffset="-212.05" />
-                                <circle class="donut-hole" cx="60" cy="60" r="30" />
-                                <text x="60" y="55" class="donut-total">847</text>
-                                <text x="60" y="70" class="donut-label">лидов</text>
-                            </svg>
-                        </div>
-                        <div class="sources-legend">
-                            <div class="source-item">
-                                <div class="source-color website"></div>
-                                <div class="source-info">
-                                    <span class="source-name">Сайт</span>
-                                    <span class="source-stat">254 (30%)</span>
-                                </div>
-                                <div class="source-bar">
-                                    <div class="source-fill website" style="width: 30%"></div>
-                                </div>
-                            </div>
-                            <div class="source-item">
-                                <div class="source-color social"></div>
-                                <div class="source-info">
-                                    <span class="source-name">Соц. сети</span>
-                                    <span class="source-stat">169 (20%)</span>
-                                </div>
-                                <div class="source-bar">
-                                    <div class="source-fill social" style="width: 20%"></div>
-                                </div>
-                            </div>
-                            <div class="source-item">
-                                <div class="source-color referral"></div>
-                                <div class="source-info">
-                                    <span class="source-name">Рекомендации</span>
-                                    <span class="source-stat">127 (15%)</span>
-                                </div>
-                                <div class="source-bar">
-                                    <div class="source-fill referral" style="width: 15%"></div>
-                                </div>
-                            </div>
-                            <div class="source-item">
-                                <div class="source-color direct"></div>
-                                <div class="source-info">
-                                    <span class="source-name">Прямые</span>
-                                    <span class="source-stat">85 (10%)</span>
-                                </div>
-                                <div class="source-bar">
-                                    <div class="source-fill direct" style="width: 10%"></div>
-                                </div>
-                            </div>
-                            <div class="source-item">
-                                <div class="source-color other"></div>
-                                <div class="source-info">
-                                    <span class="source-name">Другие</span>
-                                    <span class="source-stat">212 (25%)</span>
-                                </div>
-                                <div class="source-bar">
-                                    <div class="source-fill other" style="width: 25%"></div>
-                                </div>
-                            </div>
-                        </div>
-                    </div>
-                    <div class="rejected-stats">
-                        <div class="rejected-item">
-                            <span class="rejected-count" id="rejected-count">—</span>
-                            <span class="rejected-label">Непринятых заявок</span>
-                            <span class="rejected-percent" id="rejected-percent"></span>
-                        </div>
-                    </div>
-                </div>
-            </section>
-
-            <!-- Bottom Row -->
-            <section class="bottom-row">
-                <!-- Manager Effectiveness -->
-                <div class="chart-card managers-card">
-                    <div class="chart-header" style="flex-direction:column;gap:8px;">
-                        <div style="display:flex;justify-content:space-between;align-items:center;width:100%;">
-                            <h3>Эффективность менеджеров</h3>
-                        </div>
-                        <div style="display:flex;justify-content:space-between;align-items:center;width:100%;">
-                            <select class="chart-select">
-                                <option>По конверсии</option>
-                                <option>По выручке</option>
-                                <option>По сделкам</option>
-                            </select>
-                            <div class="date-filter" style="margin:0;">
-                                <button class="mgr-filter-btn" data-period="day" onclick="fetchDashboardData('day')">День</button>
-                                <button class="mgr-filter-btn" data-period="week" onclick="fetchDashboardData('week')">Неделя</button>
-                                <button class="mgr-filter-btn active" data-period="month" onclick="fetchDashboardData('month')">Месяц</button>
-                            </div>
-                        </div>
-                    </div>
-                    <div class="managers-list">
-                        <div class="manager-item">
-                            <div class="manager-rank gold">1</div>
-                            <div class="manager-avatar">АК</div>
-                            <div class="manager-info">
-                                <span class="manager-name">Алексей Козлов</span>
-                                <span class="manager-deals">47 сделок</span>
-                            </div>
-                            <div class="manager-stats">
-                                <div class="manager-bar">
-                                    <div class="bar-fill" style="width: 92%"></div>
-                                </div>
-                                <span class="manager-value">32.4%</span>
-                            </div>
-                            <div class="manager-revenue">₽ 3,240,000</div>
-                        </div>
-                        <div class="manager-item">
-                            <div class="manager-rank silver">2</div>
-                            <div class="manager-avatar">МП</div>
-                            <div class="manager-info">
-                                <span class="manager-name">Мария Петрова</span>
-                                <span class="manager-deals">42 сделки</span>
-                            </div>
-                            <div class="manager-stats">
-                                <div class="manager-bar">
-                                    <div class="bar-fill" style="width: 85%"></div>
-                                </div>
-                                <span class="manager-value">29.8%</span>
-                            </div>
-                            <div class="manager-revenue">₽ 2,890,000</div>
-                        </div>
-                        <div class="manager-item">
-                            <div class="manager-rank bronze">3</div>
-                            <div class="manager-avatar">ДС</div>
-                            <div class="manager-info">
-                                <span class="manager-name">Дмитрий Смирнов</span>
-                                <span class="manager-deals">38 сделок</span>
-                            </div>
-                            <div class="manager-stats">
-                                <div class="manager-bar">
-                                    <div class="bar-fill" style="width: 76%"></div>
-                                </div>
-                                <span class="manager-value">26.7%</span>
-                            </div>
-                            <div class="manager-revenue">₽ 2,450,000</div>
-                        </div>
-                        <div class="manager-item">
-                            <div class="manager-rank">4</div>
-                            <div class="manager-avatar">ЕВ</div>
-                            <div class="manager-info">
-                                <span class="manager-name">Елена Волкова</span>
-                                <span class="manager-deals">35 сделок</span>
-                            </div>
-                            <div class="manager-stats">
-                                <div class="manager-bar">
-                                    <div class="bar-fill" style="width: 68%"></div>
-                                </div>
-                                <span class="manager-value">23.9%</span>
-                            </div>
-                            <div class="manager-revenue">₽ 2,180,000</div>
-                        </div>
-                        <div class="manager-item">
-                            <div class="manager-rank">5</div>
-                            <div class="manager-avatar">ИК</div>
-                            <div class="manager-info">
-                                <span class="manager-name">Иван Кузнецов</span>
-                                <span class="manager-deals">28 сделок</span>
-                            </div>
-                            <div class="manager-stats">
-                                <div class="manager-bar">
-                                    <div class="bar-fill" style="width: 52%"></div>
-                                </div>
-                                <span class="manager-value">18.2%</span>
-                            </div>
-                            <div class="manager-revenue">₽ 1,520,000</div>
-                        </div>
-                    </div>
-                </div>
-
-                <!-- Deals in Progress -->
-                <div class="chart-card deals-card">
-                    <div class="chart-header">
-                        <h3>Сделки в работе</h3>
-                        <div class="duration-legend">
-                            <button class="duration-badge fresh" data-filter="all" onclick="filterDealsByDuration('all')">Все</button>
-                            <button class="duration-badge fresh" data-filter="fresh" onclick="filterDealsByDuration('fresh')">< 7 дней</button>
-                            <button class="duration-badge normal" data-filter="normal" onclick="filterDealsByDuration('normal')">7-14 дней</button>
-                            <button class="duration-badge warning" data-filter="warning" onclick="filterDealsByDuration('warning')">14-30 дней</button>
-                            <button class="duration-badge critical" data-filter="critical" onclick="filterDealsByDuration('critical')">> 30 дней</button>
-                        </div>
-                    </div>
-                    <div class="deals-table-wrapper">
-                        <table class="deals-table">
-                            <thead>
-                                32<tr>
-                                    <th>Сделка</th>
-                                    <th>Клиент</th>
-                                    <th>Менеджер</th>
-                                    <th>Этап</th>
-                                    <th>Сумма</th>
-                                    <th>В работе</th>
-                                </tr>
-                            </thead>
-                            <tbody>
-                                <tr>
-                                    <td class="deal-name">
-                                        <span class="deal-id">#2847</span>
-                                        Интеграция CRM
-                                    </td>
-                                    <td>ООО "ТехноСтар"</td>
-                                    <td>
-                                        <div class="cell-avatar">АК</div>
-                                    </td>
-                                    <td><span class="stage-badge negotiations">Переговоры</span></td>
-                                    <td class="deal-amount">₽ 850,000</td>
-                                    <td><span class="duration fresh">3 дня</span></td>
-                                </tr>
-                                <tr>
-                                    <td class="deal-name">
-                                        <span class="deal-id">#2831</span>
-                                        Аудит процессов
-                                    </td>
-                                    <td>АО "Металлург"</td>
-                                    <td>
-                                        <div class="cell-avatar">МП</div>
-                                    </td>
-                                    <td><span class="stage-badge qualified">Квалификация</span></td>
-                                    <td class="deal-amount">₽ 420,000</td>
-                                    <td><span class="duration normal">9 дней</span></td>
-                                </tr>
-                                <tr>
-                                    <td class="deal-name">
-                                        <span class="deal-id">#2815</span>
-                                        Разработка портала
-                                    </td>
-                                    <td>ИП Иванов А.С.</td>
-                                    <td>
-                                        <div class="cell-avatar">ДС</div>
-                                    </td>
-                                    <td><span class="stage-badge negotiations">Переговоры</span></td>
-                                    <td class="deal-amount">₽ 1,200,000</td>
-                                    <td><span class="duration warning">21 день</span></td>
-                                </tr>
-                                <tr>
-                                    <td class="deal-name">
-                                        <span class="deal-id">#2798</span>
-                                        Внедрение ERP
-                                    </td>
-                                    <td>ООО "СтройМонтаж"</td>
-                                    <td>
-                                        <div class="cell-avatar">ЕВ</div>
-                                    </td>
-                                    <td><span class="stage-badge proposal">Предложение</span></td>
-                                    <td class="deal-amount">₽ 2,400,000</td>
-                                    <td><span class="duration critical">35 дней</span></td>
-                                </tr>
-                                <tr>
-                                    <td class="deal-name">
-                                        <span class="deal-id">#2856</span>
-                                        Обучение персонала
-                                    </td>
-                                    <td>ЗАО "Логистик"</td>
-                                    <td>
-                                        <div class="cell-avatar">ИК</div>
-                                    </td>
-                                    <td><span class="stage-badge new">Новый</span></td>
-                                    <td class="deal-amount">₽ 180,000</td>
-                                    <td><span class="duration fresh">1 день</span></td>
-                                </tr>
-                            </tbody>
-                        </table>
-                    </div>
-                    <div class="deals-summary">
-                        <div class="summary-item">
-                            <span class="summary-value">156</span>
-                            <span class="summary-label">Всего сделок</span>
-                        </div>
-                        <div class="summary-item">
-                            <span class="summary-value">₽ 28.4M</span>
-                            <span class="summary-label">Общая сумма</span>
-                        </div>
-                        <div class="summary-item">
-                            <span class="summary-value">12.3</span>
-                            <span class="summary-label">Ср. дней в работе</span>
-                        </div>
-                    </div>
-                </div>
-            </section>
-
-            <!-- Channel Effectiveness (исправленный блок) -->
-            <section class="channels-section">
-                <div class="chart-card channels-card">
-                    <div class="chart-header">
-                        <h3>Эффективность каналов</h3>
-                        <div class="channel-metrics">
-                            <button class="metric-btn active">Конверсия</button>
-                            <button class="metric-btn">Лиды</button>
-                        </div>
-                    </div>
-                    <div id="channels-container" class="channels-chart">
-                        <!-- Статические строки каналов перенесены внутрь контейнера -->
-                        <div class="channel-row">
-                            <div class="channel-info">
-                                <div class="channel-icon" style="background: #ffa90020; color: #ffa900;">
-                                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                                        <circle cx="12" cy="12" r="10" />
-                                        <line x1="2" y1="12" x2="22" y2="12" />
-                                        <path d="M12 2a15.3 15.3 0 0 1 4 10 15.3 15.3 0 0 1-4 10 15.3 15.3 0 0 1-4-10 15.3 15.3 0 0 1 4-10z" />
-                                    </svg>
-                                </div>
-                                <div class="channel-name">
-                                    <span>Контекстная реклама</span>
-                                    <span class="channel-leads">245 лидов</span>
-                                </div>
-                            </div>
-                            <div class="channel-bar-container">
-                                <div class="channel-bar" style="width: 75%; background: #ffa900;"></div>
-                                <span class="channel-value">23.6%</span>
-                            </div>
-                        </div>
-                        <div class="channel-row">
-                            <div class="channel-info">
-                                <div class="channel-icon" style="background: #9dcf0020; color: #9dcf00;">
-                                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                                        <circle cx="12" cy="12" r="10" />
-                                        <line x1="2" y1="12" x2="22" y2="12" />
-                                        <path d="M12 2a15.3 15.3 0 0 1 4 10 15.3 15.3 0 0 1-4 10 15.3 15.3 0 0 1-4-10 15.3 15.3 0 0 1 4-10z" />
-                                    </svg>
-                                </div>
-                                <div class="channel-name">
-                                    <span>Социальные сети</span>
-                                    <span class="channel-leads">189 лидов</span>
-                                </div>
-                            </div>
-                            <div class="channel-bar-container">
-                                <div class="channel-bar" style="width: 60%; background: #9dcf00;"></div>
-                                <span class="channel-value">18.9%</span>
-                            </div>
-                        </div>
-                        <div class="channel-row">
-                            <div class="channel-info">
-                                <div class="channel-icon" style="background: #ff575220; color: #ff5752;">
-                                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                                        <rect x="2" y="4" width="20" height="16" rx="2" />
-                                        <path d="M22 7l-10 7L2 7" />
-                                    </svg>
-                                </div>
-                                <div class="channel-name">
-                                    <span>Email-рассылки</span>
-                                    <span class="channel-leads">84 лида</span>
-                                </div>
-                            </div>
-                            <div class="channel-bar-container">
-                                <div class="channel-bar" style="width: 48%; background: #ff5752;"></div>
-                                <span class="channel-value">15.3%</span>
-                            </div>
-                        </div>
-                        <div class="channel-row">
-                            <div class="channel-info">
-                                <div class="channel-icon" style="background: #ab7fe620; color: #ab7fe6;">
-                                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                                        <path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2" />
-                                        <circle cx="9" cy="7" r="4" />
-                                        <path d="M23 21v-2a4 4 0 0 0-3-3.87" />
-                                        <path d="M16 3.13a4 4 0 0 1 0 7.75" />
-                                    </svg>
-                                </div>
-                                <div class="channel-name">
-                                    <span>Партнёрская сеть</span>
-                                    <span class="channel-leads">36 лидов</span>
-                                </div>
-                            </div>
-                            <div class="channel-bar-container">
-                                <div class="channel-bar" style="width: 95%; background: #ab7fe6;"></div>
-                                <span class="channel-value">32.1%</span>
-                            </div>
-                        </div>
-                    </div>
-                </div>
-            </section>
-
-            <!-- Страница Менеджеры -->
-            <div id="page-managers" class="page-section" style="display:none;">
-                <header class="header">
-                    <div class="header-left">
-                        <h1 class="page-title">Менеджеры</h1>
-                        <p class="page-subtitle">Детальная статистика по каждому менеджеру</p>
-                    </div>
-                </header>
-                <div id="managers-page-content">
-                    <div class="loading-placeholder">Загрузка данных менеджеров...</div>
+            <!-- Leads page controls -->
+            <div id="leads-nav-controls" style="display:none;align-items:center;gap:12px;">
+                <div class="date-filter">
+                    <button class="page-leads-filter-btn" data-period="day">День</button>
+                    <button class="page-leads-filter-btn" data-period="week">Неделя</button>
+                    <button class="page-leads-filter-btn active" data-period="month">Месяц</button>
                 </div>
             </div>
-
-            <!-- Страница Обращения -->
-            <div id="page-leads" class="page-section" style="display:none;">
-                <header class="header">
-                    <div class="header-left">
-                        <h1 class="page-title">Обращения</h1>
-                        <p class="page-subtitle">Все лиды и обращения из CRM</p>
-                    </div>
-                    <div class="header-right">
-                        <div class="chart-tabs">
-                            <button class="tab-btn active" onclick="loadLeads('all')">Все</button>
-                            <button class="tab-btn" onclick="loadLeads('accepted')">Принятые</button>
-                            <button class="tab-btn" onclick="loadLeads('rejected')">Непринятые</button>
-                        </div>
-                    </div>
-                </header>
-                <div class="chart-card">
-                    <div id="leads-table-container">
-                        <div class="loading-placeholder">Загрузка обращений...</div>
-                    </div>
-                </div>
-            </div>
-
-            <!-- Страница База знаний -->
-            <div id="page-knowledge" class="page-section" style="display:none;">
-                <header class="header">
-                    <div class="header-left">
-                        <h1 class="page-title">База знаний</h1>
-                        <p class="page-subtitle">Документация и справочные материалы</p>
-                    </div>
-                </header>
-                <div id="knowledge-content" class="knowledge-layout">
-                    <div class="loading-placeholder">Загрузка базы знаний...</div>
-                </div>
-            </div>
-
-            <!-- Страница Настройки -->
-            <div id="page-settings" class="page-section" style="display:none;">
-                <header class="header">
-                    <div class="header-left">
-                        <h1 class="page-title">Настройки</h1>
-                        <p class="page-subtitle">Конфигурация дашборда</p>
-                    </div>
-                </header>
-                <div class="chart-card" style="padding: 32px;">
-                    <h3 style="margin-bottom: 16px;">Онбординг</h3>
-                    <p style="color: var(--text-secondary); margin-bottom: 16px;">Пройдите интерактивный тур по дашборду заново</p>
-                    <button onclick="localStorage.removeItem('onboarding_completed'); startOnboarding();" 
-                        style="padding: 10px 20px; background: var(--accent-primary); color: white; border: none; border-radius: var(--radius-md); cursor: pointer; font-weight: 600;">
-                        🎓 Пройти обучение заново
-                    </button>
-                </div>
-            </div>
-        </main>
+        </div>
     </div>
 
-    <script src="help-tooltips.js"></script>
-    <script src="onboarding.js"></script>
-    <script src="script.js"></script>
-</body>
+    <main class="main-content">
+        <!-- KPI Cards -->
+        <section class="kpi-grid" id="section-kpi">
+            <div class="kpi-card revenue">
+                <div class="kpi-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="12" y1="1" x2="12" y2="23"/><path d="M17 5H9.5a3.5 3.5 0 0 0 0 7h5a3.5 3.5 0 0 1 0 7H6"/></svg></div>
+                <div class="kpi-content">
+                    <span class="kpi-label">Выручка</span><span class="kpi-value">-</span>
+                    <div class="kpi-change positive"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="23 6 13.5 15.5 8.5 10.5 1 18"/><polyline points="17 6 23 6 23 12"/></svg><span>-</span></div>
+                </div>
+                <div class="kpi-sparkline"><svg viewBox="0 0 100 40" preserveAspectRatio="none"><defs><linearGradient id="rg" x1="0%" y1="0%" x2="0%" y2="100%"><stop offset="0%" stop-color="rgba(16,185,129,0.3)"/><stop offset="100%" stop-color="rgba(16,185,129,0)"/></linearGradient></defs><path d="M0,35 L15,28 L30,32 L45,20 L60,25 L75,12 L100,5 L100,40 L0,40 Z" fill="url(#rg)"/><polyline points="0,35 15,28 30,32 45,20 60,25 75,12 100,5" fill="none" stroke="#10b981" stroke-width="2"/></svg></div>
+            </div>
+            <div class="kpi-card leads">
+                <div class="kpi-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M16 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="8.5" cy="7" r="4"/><polyline points="17 11 19 13 23 9"/></svg></div>
+                <div class="kpi-content">
+                    <span class="kpi-label">Новые лиды</span><span class="kpi-value">-</span>
+                    <div class="kpi-change positive"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="23 6 13.5 15.5 8.5 10.5 1 18"/><polyline points="17 6 23 6 23 12"/></svg><span>-</span></div>
+                </div>
+                <div class="kpi-sparkline"><svg viewBox="0 0 100 40" preserveAspectRatio="none"><defs><linearGradient id="lg" x1="0%" y1="0%" x2="0%" y2="100%"><stop offset="0%" stop-color="rgba(59,130,246,0.3)"/><stop offset="100%" stop-color="rgba(59,130,246,0)"/></linearGradient></defs><path d="M0,30 L20,25 L40,28 L60,15 L80,18 L100,8 L100,40 L0,40 Z" fill="url(#lg)"/><polyline points="0,30 20,25 40,28 60,15 80,18 100,8" fill="none" stroke="#3b82f6" stroke-width="2"/></svg></div>
+            </div>
+            <div class="kpi-card conversion">
+                <div class="kpi-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"/><polyline points="22 4 12 14.01 9 11.01"/></svg></div>
+                <div class="kpi-content">
+                    <span class="kpi-label">Конверсия</span><span class="kpi-value">-</span>
+                    <div class="kpi-change positive"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="23 6 13.5 15.5 8.5 10.5 1 18"/><polyline points="17 6 23 6 23 12"/></svg><span>-</span></div>
+                </div>
+                <div class="kpi-progress"><div class="progress-ring"><svg viewBox="0 0 36 36"><path class="progress-bg" d="M18 2.0845 a 15.9155 15.9155 0 0 1 0 31.831 a 15.9155 15.9155 0 0 1 0 -31.831"/><path class="progress-fill" stroke-dasharray="0, 100" d="M18 2.0845 a 15.9155 15.9155 0 0 1 0 31.831 a 15.9155 15.9155 0 0 1 0 -31.831"/></svg></div></div>
+            </div>
+            <div class="kpi-card deals">
+                <div class="kpi-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="16" y1="13" x2="8" y2="13"/><line x1="16" y1="17" x2="8" y2="17"/></svg></div>
+                <div class="kpi-content">
+                    <span class="kpi-label">Сделок в работе</span><span class="kpi-value">-</span>
+                    <div class="kpi-change neutral"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="5" y1="12" x2="19" y2="12"/></svg><span>-</span></div>
+                </div>
+                <div class="kpi-indicator">
+                    <div class="indicator-item"><span class="indicator-dot hot"></span><span>- горячих</span></div>
+                    <div class="indicator-item"><span class="indicator-dot warm"></span><span>- в процессе</span></div>
+                    <div class="indicator-item"><span class="indicator-dot cold"></span><span>- стагнирующих</span></div>
+                </div>
+            </div>
+        </section>
 
+        <!-- Charts Row -->
+        <section class="charts-row" id="section-charts">
+            <div class="chart-card funnel-card">
+                <div class="chart-header">
+                    <h3>Воронка продаж</h3>
+                    <select id="funnel-select" class="funnel-select"><option value="all">Все воронки</option></select>
+                </div>
+                <div class="funnel-container">
+                    <div class="funnel-stage stage-1">
+                        <div class="funnel-bar" style="--width:100%"><span class="funnel-value">-</span></div>
+                        <div class="funnel-info"><span class="stage-name">Загрузка...</span><span class="stage-percent">-</span></div>
+                    </div>
+                </div>
+            </div>
+
+            <div class="chart-card sources-card">
+                <div class="chart-header">
+                    <h3>Источники обращений</h3>
+                    <div class="chart-tabs">
+                        <button class="tab-btn active" data-sources="all">Принятые</button>
+                        <button class="tab-btn" data-sources="rejected">Непринятые</button>
+                    </div>
+                </div>
+                <div class="sources-container">
+                    <div class="sources-chart">
+                        <svg viewBox="0 0 120 120" class="donut-chart" id="donut-svg">
+                            <circle class="donut-hole" cx="60" cy="60" r="30"/>
+                            <text x="60" y="55" class="donut-total" id="donut-total">-</text>
+                            <text x="60" y="70" class="donut-label">лидов</text>
+                        </svg>
+                    </div>
+                    <div class="sources-legend" id="sources-legend"></div>
+                </div>
+                <div class="rejected-stats">
+                    <div class="rejected-item">
+                        <span class="rejected-count" id="rejected-count">—</span>
+                        <span class="rejected-label">Непринятых заявок</span>
+                        <span class="rejected-percent" id="rejected-percent"></span>
+                    </div>
+                </div>
+            </div>
+        </section>
+
+        <!-- Bottom Row -->
+        <section class="bottom-row" id="section-bottom">
+            <div class="chart-card managers-card">
+                <div class="chart-header" style="flex-direction:column;gap:8px;">
+                    <div style="display:flex;justify-content:space-between;align-items:center;width:100%;">
+                        <h3>Эффективность менеджеров</h3>
+                        <div id="dash-managers-help-anchor"></div>
+                    </div>
+                    <div style="display:flex;justify-content:space-between;align-items:center;width:100%;">
+                        <select class="chart-select"><option>По конверсии</option><option>По выручке</option><option>По сделкам</option></select>
+                        <div class="date-filter" style="margin:0;">
+                            <button class="mgr-filter-btn" data-period="day" onclick="updateManagersWidget('day')">День</button>
+                            <button class="mgr-filter-btn" data-period="week" onclick="updateManagersWidget('week')">Неделя</button>
+                            <button class="mgr-filter-btn active" data-period="month" onclick="updateManagersWidget('month')">Месяц</button>
+                        </div>
+                    </div>
+                </div>
+                <div class="managers-list"></div>
+            </div>
+
+            <div class="chart-card deals-card">
+                <div class="chart-header">
+                    <h3>Сделки в работе</h3>
+                    <div class="duration-legend">
+                        <button class="duration-badge fresh" data-filter="all" onclick="filterDealsByDuration('all')">Все</button>
+                        <button class="duration-badge fresh" data-filter="fresh" onclick="filterDealsByDuration('fresh')">&lt; 7 дней</button>
+                        <button class="duration-badge normal" data-filter="normal" onclick="filterDealsByDuration('normal')">7-14 дней</button>
+                        <button class="duration-badge warning" data-filter="warning" onclick="filterDealsByDuration('warning')">14-30 дней</button>
+                        <button class="duration-badge critical" data-filter="critical" onclick="filterDealsByDuration('critical')">&gt; 30 дней</button>
+                    </div>
+                </div>
+                <div class="deals-table-wrapper">
+                    <table class="deals-table">
+                        <thead><tr><th>Сделка</th><th>Клиент</th><th>Менеджер</th><th>Этап</th><th>Сумма</th><th>В работе</th></tr></thead>
+                        <tbody></tbody>
+                    </table>
+                </div>
+                <div class="deals-summary">
+                    <div class="summary-item"><span class="summary-value">-</span><span class="summary-label">Всего сделок</span></div>
+                    <div class="summary-item"><span class="summary-value">-</span><span class="summary-label">Общая сумма</span></div>
+                    <div class="summary-item"><span class="summary-value">-</span><span class="summary-label">Ср. дней в работе</span></div>
+                </div>
+            </div>
+        </section>
+
+        <!-- Channel Effectiveness -->
+        <section class="channels-section" id="section-channels">
+            <div class="chart-card channels-card">
+                <div class="chart-header" style="flex-direction:column;gap:8px;">
+                    <div style="display:flex;justify-content:space-between;align-items:center;width:100%;">
+                        <h3>Эффективность каналов</h3>
+                        <div id="channels-help-anchor"></div>
+                    </div>
+                    <div style="display:flex;justify-content:space-between;align-items:center;width:100%;">
+                        <select class="chart-select" id="channels-metric-select">
+                            <option value="leads">Лиды (кол-во)</option>
+                            <option value="conversion">Конверсия (%)</option>
+                        </select>
+                        <div class="date-filter" style="margin:0;">
+                            <button class="chn-filter-btn" data-period="day" onclick="updateChannelsWidget('day')">День</button>
+                            <button class="chn-filter-btn" data-period="week" onclick="updateChannelsWidget('week')">Неделя</button>
+                            <button class="chn-filter-btn active" data-period="month" onclick="updateChannelsWidget('month')">Месяц</button>
+                        </div>
+                    </div>
+                </div>
+                <div id="channels-container" class="channels-chart"></div>
+            </div>
+        </section>
+
+        <!-- Страница Менеджеры -->
+        <div id="page-managers" class="page-section" style="display:none;">
+            <div id="managers-page-content"><div class="loading-placeholder">Загрузка данных менеджеров...</div></div>
+        </div>
+
+        <!-- Страница Обращения -->
+        <div id="page-leads" class="page-section" style="display:none;">
+            <div class="chart-card">
+                <div id="leads-table-container"><div class="loading-placeholder">Загрузка обращений...</div></div>
+            </div>
+        </div>
+
+        <!-- Страница База знаний -->
+        <div id="page-knowledge" class="page-section" style="display:none;">
+            <div id="knowledge-content" class="knowledge-layout"><div class="loading-placeholder">Загрузка базы знаний...</div></div>
+        </div>
+
+        <!-- Страница Настройки -->
+        <div id="page-settings" class="page-section" style="display:none;">
+            <div class="chart-card" style="padding:32px;max-width:500px;">
+                <h3 style="margin-bottom:16px;">Онбординг</h3>
+                <p style="color:var(--text-secondary);margin-bottom:16px;">Пройдите интерактивный тур по дашборду заново</p>
+                <button onclick="restartOnboarding()" style="padding:10px 20px;background:var(--accent-primary);color:white;border:none;border-radius:var(--radius-md);cursor:pointer;font-weight:600;">🎓 Пройти обучение заново</button>
+            </div>
+        </div>
+    </main>
+</div>
+<script src="help-tooltips.js"></script>
+<script src="onboarding.js"></script>
+<script src="script.js"></script>
+</body>
 </html>
