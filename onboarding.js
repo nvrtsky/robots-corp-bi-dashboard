@@ -10,7 +10,7 @@ const onboardingSteps = [
         element: '.kpi-grid',
         title: 'KPI-карточки',
         text: 'Здесь отображаются ключевые метрики: выручка, количество лидов, конверсия и активные сделки. Данные обновляются в реальном времени.',
-        position: 'bottom'
+        position: 'element-center'
     },
     {
         element: '.date-filter',
@@ -52,7 +52,7 @@ const onboardingSteps = [
         element: '.channels-card',
         title: 'Эффективность каналов',
         text: 'Сравнивайте эффективность маркетинговых каналов по конверсии или количеству лидов.',
-        position: 'top'
+        position: 'bottom-left'
     },
     {
         element: '.refresh-btn',
@@ -83,6 +83,8 @@ function startOnboarding() {
     if (onboardingActive) return;
     onboardingActive = true;
     currentStep = 0;
+    // Скролл наверх перед стартом (п.4)
+    window.scrollTo({ top: 0, behavior: 'instant' });
     createOnboardingOverlay();
     showStep(currentStep);
     window.addEventListener('scroll', onboardingScrollHandler);
@@ -174,6 +176,7 @@ function showStep(stepIndex) {
     // Создать tooltip
     const tooltip = document.createElement('div');
     tooltip.className = 'onboarding-tooltip';
+    // ПРАВКА: "Пропустить тур" → "Пропустить" (п.3)
     tooltip.innerHTML = `
         <div class="onboarding-progress-bar">
             <div class="onboarding-progress-fill" style="width: ${((stepIndex + 1) / total * 100)}%"></div>
@@ -182,7 +185,7 @@ function showStep(stepIndex) {
         <div class="onboarding-title">${step.title}</div>
         <div class="onboarding-text">${step.text}</div>
         <div class="onboarding-buttons">
-            <button class="onboarding-skip">Пропустить тур</button>
+            <button class="onboarding-skip">Пропустить</button>
             <div class="onboarding-nav">
                 ${stepIndex > 0 ? '<button class="onboarding-prev">← Назад</button>' : ''}
                 <button class="onboarding-next">${stepIndex === total - 1 ? 'Завершить ✓' : 'Далее →'}</button>
@@ -191,21 +194,22 @@ function showStep(stepIndex) {
     `;
     document.body.appendChild(tooltip);
 
-    // Позиционирование после скролла
-    setTimeout(() => {
-        positionTooltip(tooltip, step);
+    // ПРАВКА: позиционирование ПОСЛЕ того как браузер отрисовал тултип (п.4)
+    // Используем двойной requestAnimationFrame чтобы offsetHeight был реальным
+    requestAnimationFrame(() => {
+        requestAnimationFrame(() => {
+            positionTooltip(tooltip, step);
+            tooltip.classList.add('visible');
 
-        // Обновлять позицию tooltip при скролле
-        activeTooltipScrollHandler = () => {
-            if (document.querySelector('.onboarding-tooltip') === tooltip) {
-                positionTooltip(tooltip, step);
-            }
-        };
-        window.addEventListener('scroll', activeTooltipScrollHandler);
-    }, 450);
-
-    // Анимация появления
-    setTimeout(() => tooltip.classList.add('visible'), 10);
+            // Обновлять позицию при скролле
+            activeTooltipScrollHandler = () => {
+                if (document.querySelector('.onboarding-tooltip') === tooltip) {
+                    positionTooltip(tooltip, step);
+                }
+            };
+            window.addEventListener('scroll', activeTooltipScrollHandler);
+        });
+    });
 
     // Обработчики кнопок
     tooltip.querySelector('.onboarding-next').addEventListener('click', () => {
@@ -255,24 +259,56 @@ function positionTooltip(tooltip, step) {
     const margin = 16;
     const tw = 320;
 
+    // Центр KPI-сетки (position:fixed → координаты от viewport)
     if (step.position === 'center' || !step.element) {
-        tooltip.style.top = '50%';
-        tooltip.style.left = '50%';
-        tooltip.style.transform = 'translate(-50%, -50%)';
+        const tw2 = tooltip.offsetWidth  || 320;
+        const th2 = tooltip.offsetHeight || 220;
+        // Берём центр KPI-грида, если есть, иначе верхнюю треть экрана
+        const kpi = document.querySelector('.kpi-grid');
+        let cx, cy;
+        if (kpi) {
+            const r = kpi.getBoundingClientRect();
+            cx = r.left + r.width  / 2;
+            cy = r.top  + r.height / 2;
+        } else {
+            cx = window.innerWidth  / 2;
+            cy = Math.min(window.innerHeight, 600) / 3;
+        }
+        tooltip.style.top  = Math.round(cy - th2 / 2) + 'px';
+        tooltip.style.left = Math.round(cx - tw2 / 2) + 'px';
+        tooltip.style.transform = 'none';
         return;
     }
 
     const el = document.querySelector(step.element);
-    if (!el) return;
+    if (!el) {
+        const kpi = document.querySelector('.kpi-grid');
+        const tw2 = tooltip.offsetWidth  || 320;
+        const th2 = tooltip.offsetHeight || 220;
+        const cx = kpi ? kpi.getBoundingClientRect().left + kpi.getBoundingClientRect().width/2  : window.innerWidth/2;
+        const cy = kpi ? kpi.getBoundingClientRect().top  + kpi.getBoundingClientRect().height/2 : 250;
+        tooltip.style.top  = Math.round(cy - th2/2) + 'px';
+        tooltip.style.left = Math.round(cx - tw2/2) + 'px';
+        tooltip.style.transform = 'none';
+        return;
+    }
 
     const rect = el.getBoundingClientRect();
-    const th = tooltip.offsetHeight;
+    const th = tooltip.offsetHeight || 200;
     const winW = window.innerWidth;
     const winH = window.innerHeight;
 
     let top, left;
 
-    if (step.position === 'bottom') {
+    if (step.position === 'element-center') {
+        // Центр внутри элемента (для KPI-сетки)
+        top  = rect.top  + rect.height / 2 - th / 2;
+        left = rect.left + rect.width  / 2 - tw / 2;
+    } else if (step.position === 'bottom-left') {
+        // Нижний левый угол элемента (для каналов)
+        top  = rect.bottom - th - margin;
+        left = rect.left + margin;
+    } else if (step.position === 'bottom') {
         top = rect.bottom + margin;
         left = rect.left + rect.width / 2 - tw / 2;
     } else if (step.position === 'top') {
@@ -288,10 +324,10 @@ function positionTooltip(tooltip, step) {
 
     // Не выходить за края экрана
     left = Math.max(8, Math.min(left, winW - tw - 8));
-    top = Math.max(8, Math.min(top, winH - th - 8));
+    top  = Math.max(8, Math.min(top,  winH - th - 8));
 
     tooltip.style.transform = 'none';
-    tooltip.style.top = top + 'px';
+    tooltip.style.top  = top  + 'px';
     tooltip.style.left = left + 'px';
 }
 
@@ -311,15 +347,15 @@ function finishOnboarding() {
     if (pulse) pulse.remove();
 
     localStorage.setItem('onboarding_completed', 'true');
+
+    // После завершения — скролл наверх (п.4)
+    window.scrollTo({ top: 0, behavior: 'smooth' });
 }
 
 function checkAutoStart() {
+    // Автозапуск отключён — онбординг только по кнопке "Обучение"
     const urlParams = new URLSearchParams(window.location.search);
     if (urlParams.get('tour') === 'true') {
-        setTimeout(startOnboarding, 1500);
-        return;
-    }
-    if (!localStorage.getItem('onboarding_completed')) {
-        setTimeout(startOnboarding, 1500);
+        setTimeout(startOnboarding, 500);
     }
 }

@@ -63,6 +63,7 @@ function setupAutoResize() {
 
 function restartOnboarding() {
     localStorage.removeItem('onboarding_completed');
+    window.scrollTo({top: 0, behavior: 'instant'});
     navigateTo('dashboard');
     document.querySelectorAll('.nav-item').forEach(n => n.classList.remove('active'));
     document.querySelector('.nav-item[data-page="dashboard"]')?.classList.add('active');
@@ -84,7 +85,7 @@ document.addEventListener('DOMContentLoaded', () => {
     initRefreshButton();
     initTabs();
     initHelpTooltips();
-    if (typeof checkAutoStart === "function") checkAutoStart();
+    if (typeof checkAutoStart === "function") { window.scrollTo({top:0,behavior:'instant'}); checkAutoStart(); }
     updateDateRangeDisplay('month');
 
     initBitrix24();
@@ -126,12 +127,9 @@ async function fetchKPI(period) {
     try {
         const res = await fetch(apiUrl(period));
         const d = await res.json();
-        if (d.error) {
-            console.error('KPI error:', d.error);
-            return;
-        }
+        if (d.error) return;
         // KPI
-        setKPI('.kpi-card.revenue .kpi-value', d.revenue, '₽ ');
+        setKPI('.kpi-card.revenue .kpi-value', d.revenue, '', ' ₽');
         setKPI('.kpi-card.leads .kpi-value', d.leadsCount);
         setKPI('.kpi-card.deals .kpi-value', d.dealsInProgressCount);
         if (d.conversionRate !== undefined) setKPI('.kpi-card.conversion .kpi-value', d.conversionRate, '', '%');
@@ -164,18 +162,13 @@ async function fetchFunnel(period, category = funnelCategory) {
     funnelPeriod  = period;
     funnelCategory = category;
     setBtnActive('.funnel-period-btn', period);
-    showFunnelSkeleton();
     let extra = '';
     if (category && category !== 'all') extra = `&categoryId=${encodeURIComponent(category)}`;
     try {
         const res = await fetch(apiUrl(period) + extra);
         const d = await res.json();
-        if (d.error) {
-            console.error('Funnel error:', d.error);
-            return;
-        }
         if (d.funnel) renderFunnelChart(d.funnel);
-    } catch(e) { console.error('fetchFunnel', e); }
+    } catch(e) {}
 }
 
 async function fetchSources(period) {
@@ -185,15 +178,9 @@ async function fetchSources(period) {
     try {
         const res = await fetch(apiUrl(period));
         const d = await res.json();
-        if (d.error) {
-            console.error('Sources error:', d.error);
-            showSourcesSkeleton();
-            return;
-        }
         if (d.sources) {
             window._sourcesAll   = d.sources;
             window._sourcesDeals = d.dealsInProgress || [];
-            sourcesPage = 1;  // ← СБРОС ПАГИНАЦИИ
             applySourcesType();
             // rejected count
             const rej = (d.dealsInProgress||[]).filter(x =>
@@ -232,33 +219,28 @@ async function fetchManagers(period) {
     try {
         const res = await fetch(apiUrl(period));
         const d = await res.json();
-        if (d.error) {
-            console.error('Managers error:', d.error);
-            return;
-        }
         if (d.managers && d.managers.length > 0) {
             currentManagers = d.managers;
             dashMgrPage = 1;
             renderManagersWidget(sortMgr(d.managers, currentManagerSort));
         }
-    } catch(e) { console.error('fetchManagers', e); }
+    } catch(e) {}
 }
 
 async function fetchChannels(period) {
     chnPeriod = period;
     setBtnActive('.chn-period-btn', period);
+    // Show skeleton (п.13)
+    const chnContainer = document.getElementById('channels-container');
+    if (chnContainer) chnContainer.innerHTML = `<div style="display:flex;flex-direction:column;gap:16px;padding:8px 0;">${Array(5).fill('<div style="display:grid;grid-template-columns:280px 1fr;gap:24px;align-items:center;"><div class="skeleton" style="height:44px;border-radius:8px;"></div><div class="skeleton" style="height:32px;border-radius:8px;"></div></div>').join('')}</div>`;
     try {
         const res = await fetch(apiUrl(period));
         const d = await res.json();
-        if (d.error) {
-            console.error('Channels error:', d.error);
-            return;
-        }
         if (d.sources) {
             window._channelSources = d.sources;
             renderChannels(d.sources);
         }
-    } catch(e) { console.error('fetchChannels', e); }
+    } catch(e) {}
 }
 
 // ── Funnels dropdown ──────────────────────────────────────────
@@ -268,10 +250,6 @@ async function loadFunnels() {
         if (bitrixDomain) url += `?domain=${encodeURIComponent(bitrixDomain)}`;
         const res = await fetch(url);
         const d = await res.json();
-        if (d.error) {
-            console.error('Funnels error:', d.error);
-            return;
-        }
         if (d.funnels && d.funnels.length > 0) {
             funnelsList = d.funnels;
             const sel = document.getElementById('funnel-select');
@@ -284,7 +262,7 @@ async function loadFunnels() {
                 });
             }
         }
-    } catch(e) { console.error('loadFunnels', e); }
+    } catch(e) {}
 }
 
 function initFunnelSelect() {
@@ -313,6 +291,11 @@ function initNavButtons() {
         btn.addEventListener('click', () => {
             document.querySelectorAll('.main-kpi-btn').forEach(b => b.classList.remove('active'));
             btn.classList.add('active');
+            // Скелетоны на KPI, источники и сделки при смене периода
+            document.querySelectorAll('.kpi-value').forEach(el => el.classList.add('skeleton'));
+            document.querySelectorAll('.kpi-change span').forEach(el => el.classList.add('skeleton'));
+            showSourcesSkeleton();
+            showDealsSkeleton();
             fetchKPI(btn.dataset.period);
         });
     });
@@ -359,6 +342,11 @@ function initChannelsMetric() {
 function setKPI(sel, val, pre='', suf='') {
     const el = document.querySelector(sel);
     if (el) { el.classList.remove('skeleton'); el.textContent = pre + fmt(val) + suf; }
+    // Hide sparkline if revenue is 0 or negative (п.5)
+    if (sel.includes('revenue')) {
+        const sparkline = document.querySelector('.kpi-card.revenue .kpi-sparkline');
+        if (sparkline) sparkline.style.opacity = (parseFloat(val)||0) <= 0 ? '0' : '0.6';
+    }
 }
 
 function setKPIChange(cardSel, val) {
@@ -420,50 +408,19 @@ function showSourcesSkeleton() {
             <div class="skeleton" style="height:6px;width:100px;border-radius:3px;"></div>
         </div>`).join('');
     const dt = document.getElementById('donut-total');
-    if (dt) {
-        dt.textContent = '';
-        dt.classList.add('skeleton');
-    }
+    if (dt) dt.textContent = '-';
     const svg = document.getElementById('donut-svg');
-    if (svg) {
-        svg.classList.add('skeleton');
-        svg.querySelectorAll('.dyn-seg').forEach(s => s.remove());
-    }
+    if (svg) svg.querySelectorAll('.dyn-seg').forEach(s => s.remove());
 }
-
-function showFunnelSkeleton() {
-    const container = document.querySelector('.funnel-container');
-    if (!container) return;
-    container.innerHTML = Array(3).fill(`
-        <div class="funnel-stage">
-            <div class="funnel-bar skeleton" style="--width:70%"><span class="funnel-value skeleton">-</span></div>
-            <div class="funnel-info"><span class="stage-name skeleton">Загрузка...</span><span class="stage-percent skeleton">-</span></div>
-        </div>
-    `).join('');
-}
-
-let sourcesPage = 1;
-const sourcesPerPage = 5;
-let currentSourcesEntries = [];
 
 function renderDonut(sources) {
     const total = Object.values(sources).reduce((a,b)=>a+b,0);
     if (!total) return;
-    
-    // Убираем скелетон с круговой диаграммы
-    const svgEl = document.getElementById('donut-svg');
-    if (svgEl) svgEl.classList.remove('skeleton');
-    
     const el = document.getElementById('donut-total');
-    if (el) {
-        el.textContent = fmt(total);
-        el.classList.remove('skeleton');
-    }
+    if (el) el.textContent = fmt(total);
 
     const colors = ['#6366f1','#2fc6f6','#ffa900','#9dcf00','#ec4899','#14b8a6','#ff5752','#ab7fe6'];
-    const entries = Object.entries(sources).sort((a,b)=>b[1]-a[1]);
-    currentSourcesEntries = entries;
-    
+    const entries = Object.entries(sources);
     const circ = 2 * Math.PI * 45;
     const svg = document.getElementById('donut-svg');
     if (svg) {
@@ -484,53 +441,18 @@ function renderDonut(sources) {
         });
     }
 
-    sourcesPage = 1;
-    renderSourcesLegend();
-}
-
-function renderSourcesLegend() {
     const legend = document.getElementById('sources-legend');
-    if (!legend) return;
-    
-    const total = currentSourcesEntries.reduce((s,[,c])=>s+c,0);
-    const colors = ['#6366f1','#2fc6f6','#ffa900','#9dcf00','#ec4899','#14b8a6','#ff5752','#ab7fe6'];
-    const totalPages = Math.ceil(currentSourcesEntries.length / sourcesPerPage);
-    const start = (sourcesPage - 1) * sourcesPerPage;
-    const pageEntries = currentSourcesEntries.slice(start, start + sourcesPerPage);
-    
-    legend.innerHTML = pageEntries.map(([name, count], i) => {
-        const color = colors[(start + i) % colors.length];
-        const pct = ((count/total)*100).toFixed(0);
-        return `<div class="source-item">
-            <div style="width:12px;height:12px;border-radius:3px;background:${color};flex-shrink:0;"></div>
-            <div class="source-info"><span class="source-name">${name}</span><span class="source-stat">${count} (${pct}%)</span></div>
-            <div class="source-bar"><div class="source-fill" style="width:${pct}%;background:${color}"></div></div>
-        </div>`;
-    }).join('');
-    
-    // Добавляем пагинацию, если нужно
-    if (totalPages > 1) {
-        let paginationDiv = document.getElementById('sources-pagination');
-        if (!paginationDiv) {
-            paginationDiv = document.createElement('div');
-            paginationDiv.id = 'sources-pagination';
-            paginationDiv.style.cssText = 'display:flex;justify-content:center;align-items:center;gap:8px;padding:12px;margin-top:8px;border-top:1px solid var(--border-color);';
-            legend.parentNode.appendChild(paginationDiv);
-        }
-        paginationDiv.innerHTML = `
-            <button onclick="changeSourcesPage(-1)" style="padding:4px 12px;border:1px solid var(--border-color);border-radius:var(--radius-sm);background:var(--bg-tertiary);cursor:pointer;" ${sourcesPage===1?'disabled':''}>←</button>
-            <span style="font-size:0.8125rem;color:var(--text-secondary);">${sourcesPage} / ${totalPages}</span>
-            <button onclick="changeSourcesPage(1)" style="padding:4px 12px;border:1px solid var(--border-color);border-radius:var(--radius-sm);background:var(--bg-tertiary);cursor:pointer;" ${sourcesPage>=totalPages?'disabled':''}>→</button>
-        `;
-    } else {
-        const paginationDiv = document.getElementById('sources-pagination');
-        if (paginationDiv) paginationDiv.remove();
+    if (legend) {
+        legend.innerHTML = entries.map(([name, count], i) => {
+            const color = colors[i%colors.length];
+            const pct = ((count/total)*100).toFixed(0);
+            return `<div class="source-item">
+                <div style="width:12px;height:12px;border-radius:3px;background:${color};flex-shrink:0;"></div>
+                <div class="source-info"><span class="source-name">${name}</span><span class="source-stat">${count} (${pct}%)</span></div>
+                <div class="source-bar"><div class="source-fill" style="width:${pct}%;background:${color}"></div></div>
+            </div>`;
+        }).join('');
     }
-}
-
-function changeSourcesPage(dir) {
-    sourcesPage = Math.max(1, Math.min(sourcesPage + dir, Math.ceil(currentSourcesEntries.length / sourcesPerPage)));
-    renderSourcesLegend();
 }
 
 // ── Managers widget (dashboard) ───────────────────────────────
@@ -552,7 +474,7 @@ function renderManagersWidget(managers) {
                 ${m.photo?'':initials}</div>
             <div class="manager-info"><span class="manager-name">${m.name}</span><span class="manager-deals">${m.deals} сделок</span></div>
             <div class="manager-stats"><div class="manager-bar"><div class="bar-fill" style="width:${pct}%"></div></div></div>
-            <div class="manager-revenue" style="white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:100px;">₽ ${fmt(m.revenue)}</div>
+            <div class="manager-revenue" style="white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:100px;">${fmtMoney(m.revenue)}</div>
         </div>`;
     }).join('');
 
@@ -618,9 +540,9 @@ function renderDealsTable(deals) {
             <td style="font-size:0.8125rem;color:var(--text-secondary);max-width:120px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">${deal.TITLE||'—'}</td>
             <td><div style="display:flex;align-items:center;gap:6px;"><div class="cell-avatar" style="${mgrPhoto}">${mgrPhoto?'':mgrInit}</div><span style="font-size:0.75rem;color:var(--text-secondary);">${mgrName}</span></div></td>
             <td><span class="stage-badge">${deal.stageName||deal.STAGE_ID}</span></td>
-            <td class="deal-amount">₽ ${fmt(parseFloat(deal.OPPORTUNITY)||0)}</td>
+            <td class="deal-amount">${fmtMoney(parseFloat(deal.OPPORTUNITY)||0)}</td>
             <td><span class="duration ${dc}">${days} дн.</span></td>
-         </tr>`;
+        </tr>`;
     }).join('');
 
     let pg = document.querySelector('.deals-pagination');
@@ -633,7 +555,7 @@ function renderDealsTable(deals) {
         const sum = currentDeals.reduce((s,d)=>s+parseFloat(d.OPPORTUNITY||0),0);
         const avg = currentDeals.length ? Math.round(currentDeals.reduce((s,d)=>s+(d.daysInProgress||0),0)/currentDeals.length) : 0;
         sv[0].textContent = currentDeals.length;
-        sv[1].textContent = '₽ '+fmt(Math.round(sum/1000000*10)/10)+'M';
+        sv[1].textContent = fmtMoney(Math.round(sum/1000000*10)/10)+' M';
         sv[2].textContent = avg;
     }
 }
@@ -687,17 +609,9 @@ async function loadPageManagers(period = pageMgrPeriod) {
     try {
         const res = await fetch(apiUrl(period));
         const d = await res.json();
-        if (d.error) {
-            console.error('Page managers error:', d.error);
-            container.innerHTML = '<div style="padding:32px;text-align:center;color:var(--danger);">Ошибка загрузки</div>';
-            return;
-        }
         if (d.managers) currentManagers = d.managers;
         renderPageManagers(currentManagers);
-    } catch(e) { 
-        console.error('loadPageManagers', e);
-        container.innerHTML = '<div style="padding:32px;text-align:center;color:var(--danger);">Ошибка загрузки</div>';
-    }
+    } catch(e) { renderPageManagers(currentManagers); }
 }
 
 function renderPageManagers(managers) {
@@ -713,7 +627,7 @@ function renderPageManagers(managers) {
     container.innerHTML = `
         <div style="display:grid;grid-template-columns:repeat(3,1fr);gap:16px;margin-bottom:24px;">
             <div class="chart-card" style="text-align:center;padding:24px;"><div style="font-size:2rem;font-weight:800;color:var(--accent-primary)">${managers.length}</div><div style="color:var(--text-secondary);margin-top:4px;">Всего менеджеров</div></div>
-            <div class="chart-card" style="text-align:center;padding:24px;"><div style="font-size:2rem;font-weight:800;color:var(--success)">₽ ${fmt(managers.reduce((s,m)=>s+m.revenue,0))}</div><div style="color:var(--text-secondary);margin-top:4px;">Общая выручка</div></div>
+            <div class="chart-card" style="text-align:center;padding:24px;"><div style="font-size:2rem;font-weight:800;color:var(--success)">${fmtMoney(managers.reduce((s,m)=>s+m.revenue,0))}</div><div style="color:var(--text-secondary);margin-top:4px;">Общая выручка</div></div>
             <div class="chart-card" style="text-align:center;padding:24px;"><div style="font-size:2rem;font-weight:800;color:var(--warning)">${managers.reduce((s,m)=>s+m.deals,0)}</div><div style="color:var(--text-secondary);margin-top:4px;">Всего сделок</div></div>
         </div>
         <div class="chart-card">
@@ -729,7 +643,7 @@ function renderPageManagers(managers) {
                         ${m.photo?'':ini}</div>
                     <div class="manager-info"><span class="manager-name">${m.name}</span><span class="manager-deals">${m.deals} сделок</span></div>
                     <div class="manager-stats"><div class="manager-bar"><div class="bar-fill" style="width:${pct}%"></div></div></div>
-                    <div class="manager-revenue" style="white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:100px;">₽ ${fmt(m.revenue)}</div>
+                    <div class="manager-revenue" style="white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:100px;">${fmtMoney(m.revenue)}</div>
                 </div>`;
             }).join('')}</div>
             <div style="display:flex;justify-content:center;align-items:center;gap:8px;padding:12px;border-top:1px solid var(--border-color);">
@@ -764,11 +678,6 @@ async function loadPageLeads(status = pageLeadsStatus, period = pageLeadsPeriod)
     try {
         const res = await fetch(apiUrl(period));
         const d = await res.json();
-        if (d.error) {
-            console.error('Page leads error:', d.error);
-            container.innerHTML = '<div style="padding:32px;color:var(--danger);">Ошибка загрузки</div>';
-            return;
-        }
         let leads = (d.dealsInProgress||[]).map(deal => ({
             id: deal.ID, title: deal.TITLE||'Без названия',
             source: deal.stageName||'—', status: deal.STAGE_ID,
@@ -778,10 +687,7 @@ async function loadPageLeads(status = pageLeadsStatus, period = pageLeadsPeriod)
         if (status==='accepted') leads = leads.filter(l=>!l.status.includes('LOSE')&&!l.status.includes('JUNK'));
         else if (status==='rejected') leads = leads.filter(l=>l.status.includes('LOSE')||l.status.includes('JUNK'));
         currentLeads = leads; leadsPage = 1; renderLeadsPage();
-    } catch(e) { 
-        console.error('loadPageLeads', e);
-        container.innerHTML = '<div style="padding:32px;color:var(--danger);">Ошибка загрузки</div>';
-    }
+    } catch(e) { container.innerHTML = '<div style="padding:32px;color:var(--danger);">Ошибка загрузки</div>'; }
 }
 
 function renderLeadsPage() {
@@ -802,8 +708,8 @@ function renderLeadsPage() {
                 <td><div style="display:flex;align-items:center;gap:8px;"><div class="cell-avatar">${(l.assignedName||'М').charAt(0)}</div><span style="font-size:0.8125rem;">${l.assignedName}</span></div></td>
                 <td><span style="padding:4px 10px;border-radius:4px;font-size:0.6875rem;font-weight:600;background:${(statusColors[l.status]||'var(--text-tertiary)')}22;color:${statusColors[l.status]||'var(--text-tertiary)'};">${statusLabels[l.status]||l.status||'—'}</span></td>
                 <td style="font-size:0.8125rem;color:var(--text-secondary);">${new Date(l.dateCreate).toLocaleDateString('ru-RU')}</td>
-             </tr>`).join('')}</tbody>
-         </table></div>
+            </tr>`).join('')}</tbody>
+        </table></div>
         <div style="display:flex;justify-content:center;align-items:center;gap:8px;padding:12px;border-top:1px solid var(--border-color);">${pgHTML(leadsPage, totalPages, 'changeLeadsPage')}</div>`;
 }
 
@@ -890,7 +796,18 @@ function pgHTML(page, total, fn) {
         <button onclick="${fn}(1)" style="padding:4px 12px;border:1px solid var(--border-color);border-radius:var(--radius-sm);background:var(--bg-tertiary);cursor:pointer;" ${page>=total?'disabled':''}>→</button>`;
 }
 
-function fmt(num) { return (Math.round(parseFloat(num)||0)).toString().replace(/\B(?=(\d{3})+(?!\d))/g,','); }
+function fmt(num) {
+    const n = Math.round(parseFloat(num)||0);
+    return n.toLocaleString('ru-RU');
+}
+function fmtMoney(num) {
+    const n = parseFloat(num)||0;
+    // Формат: 248 192,00 руб.
+    return n.toLocaleString('ru-RU', {
+        minimumFractionDigits: 2,
+        maximumFractionDigits: 2
+    }) + ' руб.';
+}
 
 function fmtDate(date) {
     const m=['янв','фев','мар','апр','май','июн','июл','авг','сен','окт','ноя','дек'];
@@ -915,6 +832,27 @@ function updateDashboardUI() {}
 function fetchDashboardData(p) { return fetchKPI(p||kpiPeriod); }
 function updateChannelsChart(s) { window._channelSources=s; renderChannels(s); }
 function updateChannelsChartLeads(s) { window._channelSources=s; renderChannels(s); }
+
+// Bitrix-mode horizontal nav click
+function bxNavClick(btn, page) {
+    document.querySelectorAll('.bx-nav-btn').forEach(b => b.classList.remove('active'));
+    btn.classList.add('active');
+    if (page === 'onboarding') {
+        restartOnboarding();
+        // Вернуть кнопку Дашборд в активное
+        setTimeout(() => {
+            document.querySelectorAll('.bx-nav-btn').forEach(b => {
+                b.classList.toggle('active', b.dataset.page === 'dashboard');
+            });
+        }, 100);
+        return;
+    }
+    // Синхронизируем боковое меню
+    document.querySelectorAll('.nav-item').forEach(n => {
+        n.classList.toggle('active', n.dataset.page === page);
+    });
+    navigateTo(page);
+}
 
 const _obs = new IntersectionObserver(entries=>{entries.forEach(e=>{if(e.isIntersecting){e.target.classList.add('visible');_obs.unobserve(e.target);}});},{threshold:0.1});
 document.querySelectorAll('.chart-card').forEach(c=>_obs.observe(c));
