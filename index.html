@@ -156,13 +156,27 @@
         <section class="kpi-grid" id="section-kpi">
             <div class="kpi-card revenue">
                 <div class="kpi-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="12" y1="1" x2="12" y2="23"/><path d="M17 5H9.5a3.5 3.5 0 0 0 0 7h5a3.5 3.5 0 0 1 0 7H6"/></svg></div>
-                <div class="kpi-content"><span class="kpi-label">Выручка</span><span class="kpi-value">-</span><div class="kpi-change positive"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="23 6 13.5 15.5 8.5 10.5 1 18"/><polyline points="17 6 23 6 23 12"/></svg><span>-</span></div></div>
-                <div class="kpi-sparkline"><svg viewBox="0 0 100 40" preserveAspectRatio="none"><defs><linearGradient id="rg" x1="0%" y1="0%" x2="0%" y2="100%"><stop offset="0%" stop-color="rgba(16,185,129,0.3)"/><stop offset="100%" stop-color="rgba(16,185,129,0)"/></linearGradient></defs><path d="M0,35 L15,28 L30,32 L45,20 L60,25 L75,12 L100,5 L100,40 L0,40 Z" fill="url(#rg)"/><polyline points="0,35 15,28 30,32 45,20 60,25 75,12 100,5" fill="none" stroke="#10b981" stroke-width="2"/></svg></div>
+                <div class="kpi-content">
+                    <span class="kpi-label">Выручка</span>
+                    <span class="kpi-value">-</span>
+                    <div class="kpi-change positive">
+                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="23 6 13.5 15.5 8.5 10.5 1 18"/><polyline points="17 6 23 6 23 12"/></svg>
+                        <span>-</span>
+                    </div>
+                </div>
+                <!-- kpi-sparkline УДАЛЁН -->
             </div>
             <div class="kpi-card leads">
                 <div class="kpi-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M16 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="8.5" cy="7" r="4"/><polyline points="17 11 19 13 23 9"/></svg></div>
-                <div class="kpi-content"><span class="kpi-label">Новые лиды</span><span class="kpi-value">-</span><div class="kpi-change positive"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="23 6 13.5 15.5 8.5 10.5 1 18"/><polyline points="17 6 23 6 23 12"/></svg><span>-</span></div></div>
-                <div class="kpi-sparkline"><svg viewBox="0 0 100 40" preserveAspectRatio="none"><defs><linearGradient id="lg" x1="0%" y1="0%" x2="0%" y2="100%"><stop offset="0%" stop-color="rgba(59,130,246,0.3)"/><stop offset="100%" stop-color="rgba(59,130,246,0)"/></linearGradient></defs><path d="M0,30 L20,25 L40,28 L60,15 L80,18 L100,8 L100,40 L0,40 Z" fill="url(#lg)"/><polyline points="0,30 20,25 40,28 60,15 80,18 100,8" fill="none" stroke="#3b82f6" stroke-width="2"/></svg></div>
+                <div class="kpi-content">
+                    <span class="kpi-label">Новые лиды</span>
+                    <span class="kpi-value">-</span>
+                    <div class="kpi-change positive">
+                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="23 6 13.5 15.5 8.5 10.5 1 18"/><polyline points="17 6 23 6 23 12"/></svg>
+                        <span>-</span>
+                    </div>
+                </div>
+                <!-- kpi-sparkline УДАЛЁН -->
             </div>
             <div class="kpi-card conversion">
                 <div class="kpi-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"/><polyline points="22 4 12 14.01 9 11.01"/></svg></div>
@@ -206,7 +220,7 @@
                 </div>
             </div>
 
-            <!-- Источники обращений -->
+            <!-- ① ИСТОЧНИКИ ОБРАЩЕНИЙ — убран дропдаун принятые/непринятые, убраны rejected-stats -->
             <div class="chart-card sources-card">
                 <div class="chart-header" style="flex-direction:column;gap:8px;">
                     <div class="widget-header-row">
@@ -214,10 +228,7 @@
                         <div id="sources-help-anchor"></div>
                     </div>
                     <div class="widget-subrow">
-                        <select class="chart-select" id="sources-type-select">
-                            <option value="all">Принятые</option>
-                            <option value="rejected">Непринятые</option>
-                        </select>
+                        <!-- select-dropdown УДАЛЁН, только период -->
                         <div class="date-filter" style="margin:0;">
                             <button class="widget-filter-btn sources-period-btn active" data-period="day">День</button>
                             <button class="widget-filter-btn sources-period-btn" data-period="week">Неделя</button>
@@ -234,13 +245,7 @@
                     </div>
                     <div class="sources-legend" id="sources-legend"></div>
                 </div>
-                <div class="rejected-stats">
-                    <div class="rejected-item">
-                        <span class="rejected-count" id="rejected-count">—</span>
-                        <span class="rejected-label">Непринятых заявок</span>
-                        <span class="rejected-percent" id="rejected-percent"></span>
-                    </div>
-                </div>
+                <!-- rejected-stats УДАЛЁН -->
             </div>
         </section>
 
@@ -293,6 +298,7 @@
 
         <!-- Каналы -->
         <section class="channels-section" id="section-channels">
+            <!-- ② ЭФФЕКТИВНОСТЬ КАНАЛОВ — убран дропдаун метрики, только абсолютное число -->
             <div class="chart-card channels-card">
                 <div class="chart-header" style="flex-direction:column;gap:8px;">
                     <div class="widget-header-row">
@@ -300,7 +306,7 @@
                         <div id="channels-help-anchor"></div>
                     </div>
                     <div class="widget-subrow">
-                        <select class="chart-select" id="channels-metric-select"><option value="leads">Лиды (кол-во)</option><option value="conversion">Конверсия (%)</option></select>
+                        <!-- select-dropdown (метрика) УДАЛЁН, только период -->
                         <div class="date-filter" style="margin:0;">
                             <button class="widget-filter-btn chn-period-btn active" data-period="day">День</button>
                             <button class="widget-filter-btn chn-period-btn" data-period="week">Неделя</button>

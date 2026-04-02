@@ -1,4 +1,5 @@
-// BI Dashboard Express Server for Bitrix24 Integration
+// BI Dashboard Express Server — Refactored
+// Each widget has its own endpoint. No shared monolith.
 const express = require('express');
 const path = require('path');
 const storage = require('./storage');
@@ -11,9 +12,7 @@ app.use(express.json());
 app.use(express.urlencoded({ extended: false }));
 app.use(express.static(__dirname));
 
-// server.js – добавьте в начало файла (после require)
-
-// Списки стадий для определения статуса сделки
+// ── Stage constants ────────────────────────────────────────────
 const SUCCESS_STAGES = [
     "Заявки на рассылку", "Квалифицирован", "NPS собран",
     "Экскурсия проведена", "День рождения проведен"
@@ -21,98 +20,96 @@ const SUCCESS_STAGES = [
 const FAIL_STAGES = [
     "Выбрали что-то другое", "Не подошли условия",
     "Не отвечает более 3х раз", "Запрос в техподдержку закрыт", "Спам",
-    "Потребность исчезла",
+    "Потребность исчезла"
 ];
 
-// НОВЫЙ ЭНДПОИНТ – НЕ ЗАВИСИТ ОТ ПАРАМЕТРОВ ДАТЫ
-app.get('/api/deals/in-progress', async (req, res) => {
-    try {
-        const client = getClient(req);
-        
-        // Ограничение: только сделки, созданные не более 10 дней назад
-        const tenDaysAgo = new Date();
-        tenDaysAgo.setDate(tenDaysAgo.getDate() - 10);
-        const dateFilter = { '>=DATE_CREATE': tenDaysAgo.toISOString().split('T')[0] };
+// ── Shared helpers ─────────────────────────────────────────────
 
-        const allDeals = await getAll(client, 'crm.deal.list', {
-            filter: dateFilter,
-            select: ['ID', 'TITLE', 'OPPORTUNITY', 'ASSIGNED_BY_ID', 'DATE_CREATE', 'STAGE_ID', 'CATEGORY_ID', 'SEMANTIC']
-        });
-
-        // Получаем названия стадий для всех воронок
-        const stageMap = {};
-        const commonStages = await client.call('crm.dealcategory.stage.list', { id: 0 });
-        if (commonStages.result) commonStages.result.forEach(s => { stageMap[s.STATUS_ID] = s.NAME; });
-        const categories = await client.call('crm.dealcategory.list');
-        if (categories.result) {
-            for (const cat of categories.result) {
-                const catStages = await client.call('crm.dealcategory.stage.list', { id: cat.ID });
-                if (catStages.result) catStages.result.forEach(s => { stageMap[s.STATUS_ID] = s.NAME; });
-            }
-        }
-
-        const now = new Date();
-        const dealsInProgress = [];
-        let totalAmount = 0;
-        const categoryCounts = { fresh: 0, normal: 0, warning: 0, critical: 0 };
-
-        for (const deal of allDeals.result) {
-            const stageName = stageMap[deal.STAGE_ID] || deal.STAGE_ID;
-            let isSuccess = ["Заявки на рассылку","Квалифицирован","NPS собран","Экскурсия проведена","День рождения проведен"].includes(stageName);
-            let isFail = ["Выбрали что-то другое","Не подошли условия","Не отвечает более 3х раз","Запрос в техподдержку закрыт","Спам"].includes(stageName);
-            if (!isSuccess && !isFail && deal.SEMANTIC) {
-                isSuccess = (deal.SEMANTIC === 'S');
-                isFail = (deal.SEMANTIC === 'F');
-            }
-            if (isSuccess || isFail) continue;
-
-            const created = new Date(deal.DATE_CREATE);
-            const daysInProgress = Math.floor((now - created) / (1000 * 60 * 60 * 24));
-            let durationCategory = '';
-            if (daysInProgress < 7) { durationCategory = 'fresh'; categoryCounts.fresh++; }
-            else if (daysInProgress < 14) { durationCategory = 'normal'; categoryCounts.normal++; }
-            else if (daysInProgress < 30) { durationCategory = 'warning'; categoryCounts.warning++; }
-            else { durationCategory = 'critical'; categoryCounts.critical++; }
-
-            totalAmount += parseFloat(deal.OPPORTUNITY) || 0;
-            dealsInProgress.push({
-                ID: deal.ID, TITLE: deal.TITLE || 'Без названия', OPPORTUNITY: parseFloat(deal.OPPORTUNITY) || 0,
-                ASSIGNED_BY_ID: deal.ASSIGNED_BY_ID, DATE_CREATE: deal.DATE_CREATE, STAGE_ID: deal.STAGE_ID,
-                stageName: stageName, daysInProgress: daysInProgress, durationCategory: durationCategory
-            });
-        }
-
-        res.json({ deals: dealsInProgress, total: dealsInProgress.length, totalAmount: totalAmount, categories: categoryCounts });
-    } catch (e) {
-        console.error('[API Deals Error]', e.message);
-        res.status(500).json({ error: e.message });
-    }
-});
-
-// Функция для получения всех записей с пагинацией
+/** Paginated fetch with hard cap at 5000 items */
 async function getAll(client, method, params = {}) {
     let allItems = [];
     let start = 0;
+    const maxItems = 5000;
     let total = null;
-    const maxItems = 5000; // защита от бесконечного цикла
-    
     while (true) {
         const response = await client.call(method, { ...params, start });
         const items = response.result || [];
         allItems.push(...items);
         total = response.total;
-        
-        // Если нет следующей страницы или достигли конца
         if (!response.next && (total === undefined || allItems.length >= total)) break;
         if (allItems.length >= maxItems) break;
-        
-        // Переход к следующей странице
         start = response.next || allItems.length;
-        if (start >= total) break;
+        if (total !== undefined && start >= total) break;
     }
     return { result: allItems, total: total || allItems.length };
 }
 
+/** Build STAGE_ID → stage name map across all funnels */
+async function buildStageMap(client) {
+    const stageMap = {};
+    const commonStages = await client.call('crm.dealcategory.stage.list', { id: 0 });
+    if (commonStages.result) commonStages.result.forEach(s => { stageMap[s.STATUS_ID] = s.NAME; });
+    const categories = await client.call('crm.dealcategory.list');
+    if (categories.result) {
+        for (const cat of categories.result) {
+            try {
+                const catStages = await client.call('crm.dealcategory.stage.list', { id: cat.ID });
+                if (catStages.result) catStages.result.forEach(s => { stageMap[s.STATUS_ID] = s.NAME; });
+            } catch (e) { /* ignore individual category errors */ }
+        }
+    }
+    return stageMap;
+}
+
+/** Get all STAGE_IDs whose name is in SUCCESS_STAGES */
+async function getSuccessStageIds(client) {
+    const stageMap = await buildStageMap(client);
+    return Object.keys(stageMap).filter(id => SUCCESS_STAGES.includes(stageMap[id]));
+}
+
+/** Compute date range from period string. Always caps at last month max. */
+function parsePeriod(period) {
+    const today = new Date();
+    const from = new Date();
+    if (period === 'day')   from.setDate(today.getDate() - 1);
+    else if (period === 'week') from.setDate(today.getDate() - 7);
+    else from.setMonth(today.getMonth() - 1); // month (default)
+    return {
+        from: from.toISOString().split('T')[0],
+        to:   today.toISOString().split('T')[0]
+    };
+}
+
+/** Compute previous period range for delta comparison */
+function prevPeriod(from, to) {
+    const days = Math.ceil((new Date(to) - new Date(from)) / (1000 * 60 * 60 * 24));
+    const prevTo = new Date(from);
+    prevTo.setDate(prevTo.getDate() - 1);
+    const prevFrom = new Date(prevTo);
+    prevFrom.setDate(prevFrom.getDate() - days);
+    return {
+        from: prevFrom.toISOString().split('T')[0],
+        to:   prevTo.toISOString().split('T')[0]
+    };
+}
+
+function calcChange(cur, prev) {
+    if (prev === 0) return null;
+    return parseFloat(((cur - prev) / prev * 100).toFixed(1));
+}
+
+const getClient = (req) => {
+    let domain = req.query.domain || req.headers['x-bitrix-domain'];
+    if (!domain) {
+        const tokens = storage.getAll();
+        if (tokens && Object.keys(tokens).length > 0) domain = Object.keys(tokens)[0];
+    }
+    if (!domain && process.env.DEFAULT_DOMAIN) domain = process.env.DEFAULT_DOMAIN;
+    if (!domain) throw new Error('Domain required');
+    return new BitrixClient(domain);
+};
+
+// ── Static routes ──────────────────────────────────────────────
 const serveIndex = (req, res) => res.sendFile(path.join(__dirname, 'index.html'));
 app.get('/', serveIndex);
 app.post('/', serveIndex);
@@ -126,7 +123,6 @@ app.post('/api/bitrix24/install', async (req, res) => {
             if (refererUrl.hostname.includes('.bitrix24.')) DOMAIN = refererUrl.hostname;
         } catch (e) {}
     }
-    console.log('[Bitrix24 Install]', { domain: DOMAIN, hasAuth: !!AUTH_ID });
     if (DOMAIN && AUTH_ID && REFRESH_ID) {
         storage.saveTokens(DOMAIN, { AUTH_ID, REFRESH_ID, member_id, installedAt: new Date().toISOString() });
     }
@@ -134,88 +130,197 @@ app.post('/api/bitrix24/install', async (req, res) => {
     res.redirect('/?inBitrix=true');
 });
 
-const getClient = (req) => {
-    let domain = req.query.domain || req.headers['x-bitrix-domain'];
-    if (!domain) {
-        const tokens = storage.getAll();
-        if (tokens && Object.keys(tokens).length > 0) {
-            domain = Object.keys(tokens)[0];
-        }
-    }
-    if (!domain && process.env.DEFAULT_DOMAIN) domain = process.env.DEFAULT_DOMAIN;
-    if (!domain) throw new Error('Domain required');
-    return new BitrixClient(domain);
-};
-
-app.get('/api/stats/dashboard', async (req, res) => {
+// ── Endpoint 1: KPI (Revenue, Leads, Conversion) ──────────────
+// Revenue = sum of OPPORTUNITY for deals moved to SUCCESS_STAGES in period
+// Leads   = count of all deals created in period
+// Conversion = successDeals / leads * 100
+app.get('/api/kpi', async (req, res) => {
     try {
         const client = getClient(req);
-        const { dateFrom, dateTo, categoryId } = req.query;
+        const { period = 'month', categoryId } = req.query;
+        const { from, to } = parsePeriod(period);
+        const prev = prevPeriod(from, to);
 
-        const dateFilter = {};
-        if (dateFrom) dateFilter['>=DATE_CREATE'] = dateFrom;
-        if (dateTo) dateFilter['<=DATE_CREATE'] = dateTo;
+        const catFilter = categoryId && categoryId !== 'all' ? { CATEGORY_ID: categoryId } : {};
+        const successStageIds = await getSuccessStageIds(client);
 
-        // Фильтр по дате для выигранных сделок (CLOSEDATE)
-        const wonDateFilter = {};
-        if (dateFrom) wonDateFilter['>=CLOSEDATE'] = dateFrom;
-        if (dateTo) wonDateFilter['<=CLOSEDATE'] = dateTo;
+        const [successDeals, allDeals, prevSuccessDeals, prevAllDeals] = await Promise.all([
+            // Current: deals CREATED in period that are currently in a success stage
+            // NOTE: using DATE_CREATE (not DATE_MODIFY) to avoid counting old deals
+            // that were merely opened/commented and happen to be in a success stage.
+            successStageIds.length > 0
+                ? getAll(client, 'crm.deal.list', {
+                    filter: { STAGE_ID: successStageIds, '>=DATE_CREATE': from, '<=DATE_CREATE': to, ...catFilter },
+                    select: ['OPPORTUNITY', 'ASSIGNED_BY_ID']
+                  })
+                : Promise.resolve({ result: [], total: 0 }),
 
-        const periodDays = dateFrom && dateTo
-            ? Math.ceil((new Date(dateTo) - new Date(dateFrom)) / (1000 * 60 * 60 * 24))
-            : 7;
-
-        const prevDateTo = new Date(dateFrom || dateTo || new Date());
-        prevDateTo.setDate(prevDateTo.getDate() - 1);
-        const prevDateFrom = new Date(prevDateTo);
-        prevDateFrom.setDate(prevDateFrom.getDate() - periodDays);
-
-        const prevDateFilter = {
-            '>=DATE_CREATE': prevDateFrom.toISOString().split('T')[0],
-            '<=DATE_CREATE': prevDateTo.toISOString().split('T')[0]
-        };
-
-        const prevWonDateFilter = {
-            '>=CLOSEDATE': prevDateFrom.toISOString().split('T')[0],
-            '<=CLOSEDATE': prevDateTo.toISOString().split('T')[0]
-        };
-
-        const categoryFilter = {};
-        if (categoryId !== undefined && categoryId !== 'all') {
-            categoryFilter.CATEGORY_ID = categoryId;
-        }
-
-        const stageListId = categoryId !== undefined && categoryId !== 'all' ? parseInt(categoryId) : 0;
-
-        const [dealsWon, leads, dealsInProgress, allDeals, stages, sourceStatuses, dealCategories, prevDealsWon, prevLeads] = await Promise.all([
-            // Выручка: выигранные сделки с пагинацией
+            // Current: all deals created in period (= new leads)
             getAll(client, 'crm.deal.list', {
-                filter: { SEMANTIC: 'S', ...wonDateFilter, ...categoryFilter },
-                select: ['OPPORTUNITY', 'CURRENCY_ID', 'ASSIGNED_BY_ID']
+                filter: { '>=DATE_CREATE': from, '<=DATE_CREATE': to, ...catFilter },
+                select: ['ID']
             }),
-            getAll(client, 'crm.lead.list', {
-                filter: { ...dateFilter },
-                select: ['ID', 'SOURCE_ID']
-            }),
+
+            // Previous: success deals (same DATE_CREATE logic)
+            successStageIds.length > 0
+                ? getAll(client, 'crm.deal.list', {
+                    filter: { STAGE_ID: successStageIds, '>=DATE_CREATE': prev.from, '<=DATE_CREATE': prev.to, ...catFilter },
+                    select: ['OPPORTUNITY']
+                  })
+                : Promise.resolve({ result: [], total: 0 }),
+
+            // Previous: all deals
             getAll(client, 'crm.deal.list', {
-                filter: { '!SEMANTIC': ['S', 'F'], ...dateFilter, ...categoryFilter },
-                select: ['ID', 'TITLE', 'OPPORTUNITY', 'ASSIGNED_BY_ID', 'DATE_CREATE', 'STAGE_ID', 'CATEGORY_ID']
-            }),
-            getAll(client, 'crm.deal.list', {
-                filter: { ...dateFilter, ...categoryFilter },
-                select: ['ID', 'STAGE_ID', 'ASSIGNED_BY_ID', 'OPPORTUNITY', 'CATEGORY_ID']
-            }),
-            client.call('crm.dealcategory.stage.list', { id: stageListId }),
-            client.call('crm.status.list', { filter: { ENTITY_ID: 'SOURCE' } }),
-            client.call('crm.dealcategory.list'),
-            getAll(client, 'crm.deal.list', {
-                filter: { SEMANTIC: 'S', ...prevWonDateFilter, ...categoryFilter },
-                select: ['OPPORTUNITY']
-            }),
-            getAll(client, 'crm.lead.list', {
-                filter: { ...prevDateFilter },
+                filter: { '>=DATE_CREATE': prev.from, '<=DATE_CREATE': prev.to, ...catFilter },
                 select: ['ID']
             })
+        ]);
+
+        const revenue     = successDeals.result.reduce((s, d) => s + parseFloat(d.OPPORTUNITY || 0), 0);
+        const leadsCount  = allDeals.total;
+        const wonDeals    = successDeals.result.length;
+        const conversion  = leadsCount > 0 ? parseFloat((wonDeals / leadsCount * 100).toFixed(1)) : 0;
+
+        const prevRevenue    = prevSuccessDeals.result.reduce((s, d) => s + parseFloat(d.OPPORTUNITY || 0), 0);
+        const prevLeads      = prevAllDeals.total;
+        const prevWon        = prevSuccessDeals.result.length;
+        const prevConversion = prevLeads > 0 ? prevWon / prevLeads * 100 : 0;
+
+        res.json({
+            revenue, leadsCount, wonDeals, conversionRate: conversion,
+            changes: {
+                revenue:        calcChange(revenue, prevRevenue),
+                leadsCount:     calcChange(leadsCount, prevLeads),
+                conversionRate: calcChange(conversion, prevConversion)
+            }
+        });
+    } catch (e) {
+        console.error('[KPI Error]', e.message);
+        res.status(500).json({ error: e.message });
+    }
+});
+
+// ── Endpoint 2: Deals In Progress (always independent of period) ──
+// Shows deals created in last 30 days that are NOT in success/fail stages
+app.get('/api/deals/in-progress', async (req, res) => {
+    try {
+        const client = getClient(req);
+        const stageMap = await buildStageMap(client);
+
+        const monthAgo = new Date();
+        monthAgo.setMonth(monthAgo.getMonth() - 1);
+
+        const allDeals = await getAll(client, 'crm.deal.list', {
+            filter: { '>=DATE_CREATE': monthAgo.toISOString().split('T')[0] },
+            select: ['ID', 'TITLE', 'OPPORTUNITY', 'ASSIGNED_BY_ID', 'DATE_CREATE', 'STAGE_ID', 'CATEGORY_ID', 'SEMANTIC']
+        });
+
+        const now = new Date();
+        const dealsInProgress = [];
+        let totalAmount = 0;
+        const categoryCounts = { fresh: 0, normal: 0, warning: 0, critical: 0 };
+
+        for (const deal of allDeals.result) {
+            const stageName = stageMap[deal.STAGE_ID] || deal.STAGE_ID;
+            let isSuccess = SUCCESS_STAGES.includes(stageName);
+            let isFail    = FAIL_STAGES.includes(stageName);
+            if (!isSuccess && !isFail && deal.SEMANTIC) {
+                isSuccess = deal.SEMANTIC === 'S';
+                isFail    = deal.SEMANTIC === 'F';
+            }
+            if (isSuccess || isFail) continue;
+
+            const created = new Date(deal.DATE_CREATE);
+            const days = Math.floor((now - created) / (1000 * 60 * 60 * 24));
+            let cat;
+            if      (days < 7)  { cat = 'fresh';    categoryCounts.fresh++; }
+            else if (days < 14) { cat = 'normal';   categoryCounts.normal++; }
+            else if (days < 30) { cat = 'warning';  categoryCounts.warning++; }
+            else                { cat = 'critical'; categoryCounts.critical++; }
+
+            totalAmount += parseFloat(deal.OPPORTUNITY) || 0;
+            dealsInProgress.push({
+                ID: deal.ID,
+                TITLE: deal.TITLE || 'Без названия',
+                OPPORTUNITY: parseFloat(deal.OPPORTUNITY) || 0,
+                ASSIGNED_BY_ID: deal.ASSIGNED_BY_ID,
+                DATE_CREATE: deal.DATE_CREATE,
+                STAGE_ID: deal.STAGE_ID,
+                stageName,
+                daysInProgress: days,
+                durationCategory: cat
+            });
+        }
+
+        res.json({
+            deals: dealsInProgress,
+            total: dealsInProgress.length,
+            totalAmount,
+            categories: categoryCounts
+        });
+    } catch (e) {
+        console.error('[Deals In Progress Error]', e.message);
+        res.status(500).json({ error: e.message });
+    }
+});
+
+// ── Endpoint 3: Funnel ─────────────────────────────────────────
+app.get('/api/funnel', async (req, res) => {
+    try {
+        const client = getClient(req);
+        const { period = 'month', categoryId } = req.query;
+        const { from, to } = parsePeriod(period);
+
+        const catFilter   = categoryId && categoryId !== 'all' ? { CATEGORY_ID: categoryId } : {};
+        const stageListId = categoryId && categoryId !== 'all' ? parseInt(categoryId) : 0;
+
+        const [allDeals, stages, categories] = await Promise.all([
+            getAll(client, 'crm.deal.list', {
+                filter: { '>=DATE_CREATE': from, '<=DATE_CREATE': to, ...catFilter },
+                select: ['ID', 'STAGE_ID']
+            }),
+            client.call('crm.dealcategory.stage.list', { id: stageListId }),
+            client.call('crm.dealcategory.list')
+        ]);
+
+        const stageMap = {};
+        if (stages.result) stages.result.forEach(s => { stageMap[s.STATUS_ID] = s.NAME; });
+        if (categories.result) {
+            for (const cat of categories.result) {
+                try {
+                    const cs = await client.call('crm.dealcategory.stage.list', { id: cat.ID });
+                    if (cs.result) cs.result.forEach(s => { stageMap[s.STATUS_ID] = s.NAME; });
+                } catch (e) {}
+            }
+        }
+
+        const funnelData = {};
+        allDeals.result.forEach(deal => {
+            const name = stageMap[deal.STAGE_ID] || deal.STAGE_ID;
+            funnelData[name] = (funnelData[name] || 0) + 1;
+        });
+
+        res.json({ funnel: funnelData, total: allDeals.total });
+    } catch (e) {
+        console.error('[Funnel Error]', e.message);
+        res.status(500).json({ error: e.message });
+    }
+});
+
+// ── Endpoint 4: Sources (all channels, no filtering) ──────────
+// Always uses crm.lead.list for SOURCE_ID breakdown
+app.get('/api/sources', async (req, res) => {
+    try {
+        const client = getClient(req);
+        const { period = 'month' } = req.query;
+        const { from, to } = parsePeriod(period);
+
+        const [leads, sourceStatuses] = await Promise.all([
+            getAll(client, 'crm.lead.list', {
+                filter: { '>=DATE_CREATE': from, '<=DATE_CREATE': to },
+                select: ['ID', 'SOURCE_ID']
+            }),
+            client.call('crm.status.list', { filter: { ENTITY_ID: 'SOURCE' } })
         ]);
 
         const sourceNames = {};
@@ -223,47 +328,64 @@ app.get('/api/stats/dashboard', async (req, res) => {
             sourceStatuses.result.forEach(s => { sourceNames[s.STATUS_ID] = s.NAME; });
         }
 
-        const revenue = dealsWon.result.reduce((sum, deal) => sum + parseFloat(deal.OPPORTUNITY || 0), 0);
-
         const sources = {};
         leads.result.forEach(lead => {
-            const srcId = lead.SOURCE_ID || 'OTHER';
-            const srcName = sourceNames[srcId] || srcId;
-            sources[srcName] = (sources[srcName] || 0) + 1;
+            const key  = lead.SOURCE_ID || 'OTHER';
+            const name = sourceNames[key] || key;
+            sources[name] = (sources[name] || 0) + 1;
         });
 
-        const stageMap = {};
-        if (stages.result) {
-            stages.result.forEach(stage => { stageMap[stage.STATUS_ID] = stage.NAME; });
-        }
-        if (dealCategories.result && dealCategories.result.length > 0) {
-            const categoryIds = dealCategories.result.map(c => c.ID);
-            for (const catId of categoryIds) {
-                try {
-                    const catStages = await client.call('crm.dealcategory.stage.list', { id: catId });
-                    if (catStages.result) {
-                        catStages.result.forEach(stage => { stageMap[stage.STATUS_ID] = stage.NAME; });
-                    }
-                } catch (e) {}
-            }
-        }
+        res.json({ sources, total: leads.total });
+    } catch (e) {
+        console.error('[Sources Error]', e.message);
+        res.status(500).json({ error: e.message });
+    }
+});
 
-        const funnelData = {};
-        allDeals.result.forEach(deal => {
-            const stageName = stageMap[deal.STAGE_ID] || deal.STAGE_ID;
-            funnelData[stageName] = (funnelData[stageName] || 0) + 1;
-        });
+// ── Endpoint 5: Managers ──────────────────────────────────────
+// Revenue = sum of OPPORTUNITY for SUCCESS_STAGES deals in period
+// Shows ALL managers (including those with 0 revenue)
+app.get('/api/managers', async (req, res) => {
+    try {
+        const client = getClient(req);
+        const { period = 'month', categoryId } = req.query;
+        const { from, to } = parsePeriod(period);
+        const catFilter = categoryId && categoryId !== 'all' ? { CATEGORY_ID: categoryId } : {};
 
+        const successStageIds = await getSuccessStageIds(client);
+
+        const [allDeals, successDeals] = await Promise.all([
+            // All deals to gather list of all manager IDs
+            getAll(client, 'crm.deal.list', {
+                filter: { '>=DATE_CREATE': from, '<=DATE_CREATE': to, ...catFilter },
+                select: ['ID', 'ASSIGNED_BY_ID']
+            }),
+            // Success deals for revenue calculation
+            successStageIds.length > 0
+                ? getAll(client, 'crm.deal.list', {
+                    filter: { STAGE_ID: successStageIds, '>=DATE_CREATE': from, '<=DATE_CREATE': to, ...catFilter },
+                    select: ['OPPORTUNITY', 'ASSIGNED_BY_ID']
+                  })
+                : Promise.resolve({ result: [] })
+        ]);
+
+        // Revenue stats from success deals
         const managerStats = {};
-        dealsWon.result.forEach(deal => {
-            const mgrId = deal.ASSIGNED_BY_ID || 'unknown';
-            if (!managerStats[mgrId]) managerStats[mgrId] = { count: 0, revenue: 0 };
-            managerStats[mgrId].count++;
-            managerStats[mgrId].revenue += parseFloat(deal.OPPORTUNITY || 0);
+        successDeals.result.forEach(deal => {
+            const id = String(deal.ASSIGNED_BY_ID || 'unknown');
+            if (!managerStats[id]) managerStats[id] = { count: 0, revenue: 0 };
+            managerStats[id].count++;
+            managerStats[id].revenue += parseFloat(deal.OPPORTUNITY || 0);
         });
 
-        const managerIds = Object.keys(managerStats).filter(id => id !== 'unknown');
+        // Collect ALL responsible (include those with zero revenue)
+        const allIds = new Set();
+        allDeals.result.forEach(d => { if (d.ASSIGNED_BY_ID) allIds.add(String(d.ASSIGNED_BY_ID)); });
+        Object.keys(managerStats).forEach(id => allIds.add(id));
+
+        const managerIds = Array.from(allIds).filter(id => id !== 'unknown');
         let managers = [];
+
         if (managerIds.length > 0) {
             try {
                 const usersRes = await client.call('user.get', {
@@ -271,129 +393,219 @@ app.get('/api/stats/dashboard', async (req, res) => {
                     select: ['ID', 'NAME', 'LAST_NAME', 'PERSONAL_PHOTO']
                 });
                 managers = managerIds.map(id => {
-                    const user = usersRes.result.find(u => String(u.ID) === String(id));
+                    const user  = usersRes.result.find(u => String(u.ID) === id);
+                    const stats = managerStats[id] || { count: 0, revenue: 0 };
                     return {
                         id,
-                        name: user ? `${user.NAME} ${user.LAST_NAME}`.trim() : `Менеджер ${id}`,
-                        photo: user ? (user.PERSONAL_PHOTO || null) : null,
-                        deals: managerStats[id].count,
-                        revenue: managerStats[id].revenue
+                        name:   user ? `${user.NAME} ${user.LAST_NAME}`.trim() : `Менеджер ${id}`,
+                        photo:  user ? (user.PERSONAL_PHOTO || null) : null,
+                        deals:  stats.count,
+                        revenue: stats.revenue
                     };
                 }).sort((a, b) => b.revenue - a.revenue);
             } catch (e) {
                 managers = managerIds.map(id => ({
-                    id, name: `Менеджер ${id}`,
-                    deals: managerStats[id].count,
-                    revenue: managerStats[id].revenue
+                    id, name: `Менеджер ${id}`, photo: null,
+                    deals: managerStats[id]?.count || 0,
+                    revenue: managerStats[id]?.revenue || 0
                 }));
             }
         }
 
-        const dealsWithDuration = dealsInProgress.result.slice(0, 50).map(deal => {
-            const created = new Date(deal.DATE_CREATE);
-            const now = new Date();
-            const daysInProgress = Math.floor((now - created) / (1000 * 60 * 60 * 24));
-            return { ...deal, daysInProgress, stageName: stageMap[deal.STAGE_ID] || deal.STAGE_ID };
-        });
-
-        const totalDeals = allDeals.total;
-        const wonDeals = dealsWon.result.length;
-        const conversionRate = totalDeals > 0 ? ((wonDeals / totalDeals) * 100).toFixed(1) : 0;
-
-        const prevRevenue = prevDealsWon.result.reduce((sum, d) => sum + parseFloat(d.OPPORTUNITY || 0), 0);
-        const prevLeadsCount = prevLeads.total;
-
-        const calcChange = (current, previous) => {
-            if (previous === 0) return null;
-            return parseFloat(((current - previous) / previous * 100).toFixed(1));
-        };
-
-        const changes = {
-            revenue: calcChange(revenue, prevRevenue),
-            leadsCount: calcChange(leads.total, prevLeadsCount),
-            conversionRate: null
-        };
-
-        res.json({
-            revenue,
-            leadsCount: leads.total,
-            dealsInProgressCount: dealsInProgress.total,
-            dealsInProgress: dealsWithDuration,
-            sources,
-            funnel: funnelData,
-            managers,
-            conversionRate: parseFloat(conversionRate),
-            totalDeals,
-            wonDeals,
-            changes
-        });
-
+        res.json({ managers });
     } catch (e) {
-        console.error('[API Error]', e.message);
-        console.error('[API Error Stack]', e.stack);
+        console.error('[Managers Error]', e.message);
         res.status(500).json({ error: e.message });
     }
 });
 
+// ── Endpoint 6: Channels (same data as Sources, for bar chart) ─
+app.get('/api/channels', async (req, res) => {
+    try {
+        const client = getClient(req);
+        const { period = 'month' } = req.query;
+        const { from, to } = parsePeriod(period);
+
+        const [leads, sourceStatuses] = await Promise.all([
+            getAll(client, 'crm.lead.list', {
+                filter: { '>=DATE_CREATE': from, '<=DATE_CREATE': to },
+                select: ['ID', 'SOURCE_ID']
+            }),
+            client.call('crm.status.list', { filter: { ENTITY_ID: 'SOURCE' } })
+        ]);
+
+        const sourceNames = {};
+        if (sourceStatuses.result) {
+            sourceStatuses.result.forEach(s => { sourceNames[s.STATUS_ID] = s.NAME; });
+        }
+
+        const sources = {};
+        leads.result.forEach(lead => {
+            const key  = lead.SOURCE_ID || 'OTHER';
+            const name = sourceNames[key] || key;
+            sources[name] = (sources[name] || 0) + 1;
+        });
+
+        res.json({ sources, total: leads.total });
+    } catch (e) {
+        console.error('[Channels Error]', e.message);
+        res.status(500).json({ error: e.message });
+    }
+});
+
+// ── Endpoint 7: Funnels list ───────────────────────────────────
 app.get('/api/funnels', async (req, res) => {
     try {
         const client = getClient(req);
         const categories = await client.call('crm.dealcategory.list');
         const funnels = [{ ID: '0', NAME: 'Общая' }];
-        if (categories.result) {
-            categories.result.forEach(cat => funnels.push({ ID: cat.ID, NAME: cat.NAME }));
-        }
+        if (categories.result) categories.result.forEach(cat => funnels.push({ ID: cat.ID, NAME: cat.NAME }));
         res.json({ funnels });
     } catch (e) {
-        console.error('[API Funnels Error]', e.message);
         res.status(500).json({ error: e.message });
     }
 });
 
-app.get('/api/leads', async (req, res) => {
-    try {
-        const client = getClient(req);
-        const { dateFrom, dateTo, status } = req.query;
-        const dateFilter = {};
-        if (dateFrom) dateFilter['>=DATE_CREATE'] = dateFrom;
-        if (dateTo) dateFilter['<=DATE_CREATE'] = dateTo;
-        const statusFilter = {};
-        if (status === 'accepted') statusFilter.STATUS_ID = ['IN_PROCESS', 'CONVERTED'];
-        else if (status === 'rejected') statusFilter.STATUS_ID = ['JUNK'];
-
-        const leads = await getAll(client, 'crm.lead.list', {
-            filter: { ...dateFilter, ...statusFilter },
-            select: ['ID', 'TITLE', 'NAME', 'LAST_NAME', 'SOURCE_ID', 'STATUS_ID', 'DATE_CREATE', 'ASSIGNED_BY_ID']
-        });
-
-        const assignedIds = [...new Set(leads.result.map(l => l.ASSIGNED_BY_ID).filter(Boolean))];
-        let userNames = {};
-        if (assignedIds.length > 0) {
-            try {
-                const users = await client.call('user.get', { ID: assignedIds });
-                users.result.forEach(u => { userNames[u.ID] = `${u.NAME} ${u.LAST_NAME}`.trim(); });
-            } catch (e) {}
-        }
-
-        const result = leads.result.map(lead => ({
-            id: lead.ID,
-            title: lead.TITLE || `${lead.NAME || ''} ${lead.LAST_NAME || ''}`.trim() || 'Без названия',
-            source: lead.SOURCE_ID || 'Другой',
-            status: lead.STATUS_ID,
-            dateCreate: lead.DATE_CREATE,
-            assignedName: userNames[lead.ASSIGNED_BY_ID] || `Менеджер ${lead.ASSIGNED_BY_ID}`,
-            assignedId: lead.ASSIGNED_BY_ID
-        }));
-
-        res.json({ leads: result, total: leads.total });
-    } catch (e) {
-        console.error('[API Leads Error]', e.message);
-        res.status(500).json({ error: e.message });
-    }
-});
-
+// ── Health ─────────────────────────────────────────────────────
 app.get('/api/health', (req, res) => {
     res.json({ status: 'ok', timestamp: new Date().toISOString() });
+});
+
+// ── DEBUG: что система считает успешными стадиями ──────────────
+// GET /api/debug/stages?domain=...
+// Показывает полную карту STAGE_ID → название для всех воронок
+// и отмечает какие из них попали в SUCCESS_STAGES
+app.get('/api/debug/stages', async (req, res) => {
+    try {
+        const client = getClient(req);
+        const stageMap = await buildStageMap(client);
+        const successIds = Object.keys(stageMap).filter(id => SUCCESS_STAGES.includes(stageMap[id]));
+
+        const allStages = Object.entries(stageMap).map(([id, name]) => ({
+            STAGE_ID: id,
+            NAME: name,
+            isSuccess: SUCCESS_STAGES.includes(name),
+            isFail:    FAIL_STAGES.includes(name)
+        }));
+
+        res.json({
+            successStageIds: successIds,
+            successStageNames: SUCCESS_STAGES,
+            failStageNames:    FAIL_STAGES,
+            allStages,
+            totalStages: allStages.length
+        });
+    } catch (e) {
+        res.status(500).json({ error: e.message });
+    }
+});
+
+// ── DEBUG: выручка конкретного менеджера — что именно считается ─
+// GET /api/debug/manager-revenue?managerId=123&period=month&domain=...
+// Показывает список конкретных сделок, вошедших в выручку менеджера
+app.get('/api/debug/manager-revenue', async (req, res) => {
+    try {
+        const client = getClient(req);
+        const { managerId, period = 'month' } = req.query;
+        if (!managerId) return res.status(400).json({ error: 'managerId required' });
+
+        const { from, to } = parsePeriod(period);
+        const successStageIds = await getSuccessStageIds(client);
+        const stageMap = await buildStageMap(client);
+
+        const filter = {
+            STAGE_ID:          successStageIds,
+            ASSIGNED_BY_ID:    managerId,
+            '>=DATE_CREATE':   from,
+            '<=DATE_CREATE':   to
+        };
+
+        const deals = await getAll(client, 'crm.deal.list', {
+            filter,
+            select: ['ID', 'TITLE', 'OPPORTUNITY', 'STAGE_ID', 'DATE_CREATE', 'DATE_MODIFY', 'CATEGORY_ID']
+        });
+
+        const enriched = deals.result.map(d => ({
+            id:           d.ID,
+            title:        d.TITLE,
+            opportunity:  parseFloat(d.OPPORTUNITY || 0),
+            stageId:      d.STAGE_ID,
+            stageName:    stageMap[d.STAGE_ID] || d.STAGE_ID,
+            dateCreate:   d.DATE_CREATE,
+            dateModify:   d.DATE_MODIFY,
+            categoryId:   d.CATEGORY_ID
+        }));
+
+        const totalRevenue = enriched.reduce((s, d) => s + d.opportunity, 0);
+
+        res.json({
+            managerId,
+            period: { from, to },
+            totalRevenue,
+            dealCount: enriched.length,
+            deals: enriched,
+            // Extra: what DATE_MODIFY filter would have returned (for comparison)
+            note: 'Deals filtered by DATE_CREATE. To compare with old (broken) behavior, check deals where DATE_MODIFY falls in period but DATE_CREATE is outside.'
+        });
+    } catch (e) {
+        res.status(500).json({ error: e.message });
+    }
+});
+
+// ── DEBUG: все сделки менеджера за период (не только успешные) ─
+// GET /api/debug/manager-all?managerId=123&period=month&domain=...
+app.get('/api/debug/manager-all', async (req, res) => {
+    try {
+        const client = getClient(req);
+        const { managerId, period = 'month' } = req.query;
+        if (!managerId) return res.status(400).json({ error: 'managerId required' });
+
+        const { from, to } = parsePeriod(period);
+        const stageMap = await buildStageMap(client);
+
+        const deals = await getAll(client, 'crm.deal.list', {
+            filter: {
+                ASSIGNED_BY_ID:  managerId,
+                '>=DATE_CREATE': from,
+                '<=DATE_CREATE': to
+            },
+            select: ['ID', 'TITLE', 'OPPORTUNITY', 'STAGE_ID', 'DATE_CREATE', 'DATE_MODIFY', 'SEMANTIC']
+        });
+
+        const enriched = deals.result.map(d => {
+            const stageName = stageMap[d.STAGE_ID] || d.STAGE_ID;
+            return {
+                id:          d.ID,
+                title:       d.TITLE,
+                opportunity: parseFloat(d.OPPORTUNITY || 0),
+                stageId:     d.STAGE_ID,
+                stageName,
+                semantic:    d.SEMANTIC,
+                isSuccess:   SUCCESS_STAGES.includes(stageName) || d.SEMANTIC === 'S',
+                isFail:      FAIL_STAGES.includes(stageName)    || d.SEMANTIC === 'F',
+                dateCreate:  d.DATE_CREATE,
+                dateModify:  d.DATE_MODIFY
+            };
+        });
+
+        const successDeals = enriched.filter(d => d.isSuccess);
+        const inProgress   = enriched.filter(d => !d.isSuccess && !d.isFail);
+
+        res.json({
+            managerId,
+            period: { from, to },
+            summary: {
+                total:         enriched.length,
+                success:       successDeals.length,
+                inProgress:    inProgress.length,
+                fail:          enriched.filter(d => d.isFail).length,
+                totalRevenue:  successDeals.reduce((s, d) => s + d.opportunity, 0)
+            },
+            deals: enriched
+        });
+    } catch (e) {
+        res.status(500).json({ error: e.message });
+    }
 });
 
 app.listen(PORT, () => {
