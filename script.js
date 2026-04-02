@@ -5,10 +5,6 @@ let bitrixDomain = null;
 let isInBitrix   = false;
 let currentManagers   = [];
 let currentManagerSort = 'revenue';
-let currentDeals  = [];
-let currentDealFilter = 'all';
-let currentPage   = 1;
-const dealsPerPage = 5;
 
 // Each widget has its own period
 let kpiPeriod     = 'day';
@@ -29,6 +25,153 @@ const funnelPerPage = 5;
 let lastFunnelData = {};
 
 let funnelsList = [];
+
+// ── DEALS IN PROGRESS (independent) ───────────────────────────
+let dealsInProgressData = { deals: [], total: 0, totalAmount: 0, categories: { fresh:0, normal:0, warning:0, critical:0 } };
+let currentDealFilter = 'all'; // all, fresh, normal, warning, critical
+let currentDealPage = 1;
+const dealsPerPage = 5;
+
+// ЗАГРУЗКА СДЕЛОК – НЕЗАВИСИМАЯ
+async function fetchDealsInProgress() {
+    try {
+        let url = '/api/deals/in-progress';
+        if (bitrixDomain) url += `?domain=${encodeURIComponent(bitrixDomain)}`;
+        const res = await fetch(url);
+        const data = await res.json();
+        if (data.error) { console.error('Deals error:', data.error); return; }
+        dealsInProgressData = data;
+        updateDealsWidget();
+    } catch(e) { console.error('fetchDealsInProgress', e); }
+}
+
+async function fetchDealsInProgress() {
+    try {
+        let url = '/api/deals/in-progress';
+        if (bitrixDomain) url += `?domain=${encodeURIComponent(bitrixDomain)}`;
+        const res = await fetch(url);
+        const data = await res.json();
+        if (data.error) {
+            console.error('Deals error:', data.error);
+            return;
+        }
+        dealsInProgressData = data;
+        updateDealsWidget();
+    } catch(e) {
+        console.error('fetchDealsInProgress', e);
+    }
+}
+
+// В функции updateDealsWidget – добавим проверки существования элементов
+function updateDealsWidget() {
+    const kpiValue = document.querySelector('.kpi-card.deals .kpi-value');
+    if (kpiValue) {
+        kpiValue.classList.remove('skeleton');
+        kpiValue.textContent = fmt(dealsInProgressData.total);
+    }
+    const kpiChange = document.querySelector('.kpi-card.deals .kpi-change');
+    if (kpiChange) {
+        kpiChange.innerHTML = '<span>— текущие</span>';
+        kpiChange.className = 'kpi-change neutral';
+    }
+    
+    const inds = document.querySelectorAll('.indicator-item span:last-child');
+    if (inds.length >= 3) {
+        inds[0].textContent = `${dealsInProgressData.categories.fresh} горячих`;
+        inds[1].textContent = `${dealsInProgressData.categories.normal + dealsInProgressData.categories.warning} в процессе`;
+        inds[2].textContent = `${dealsInProgressData.categories.critical} стагнирующих`;
+    }
+    
+    currentDealPage = 1;
+    renderDealsTable();
+    
+    const sv = document.querySelectorAll('.deals-summary .summary-value');
+    if (sv.length >= 3) {
+        sv[0].textContent = dealsInProgressData.total;
+        sv[1].textContent = fmtMoney(Math.round(dealsInProgressData.totalAmount / 1000000 * 10) / 10) + ' M';
+        const avgDays = dealsInProgressData.total > 0 
+            ? Math.round(dealsInProgressData.deals.reduce((s,d) => s + d.daysInProgress, 0) / dealsInProgressData.total)
+            : 0;
+        sv[2].textContent = avgDays;
+    }
+}
+
+function filterDealsByDuration(filter) {
+    currentDealFilter = filter;
+    document.querySelectorAll('.duration-badge').forEach(b => {
+        b.style.opacity = b.dataset.filter === filter ? '1' : '0.5';
+        b.classList.toggle('active', b.dataset.filter === filter);
+    });
+    currentDealPage = 1;
+    renderDealsTable();
+}
+
+function renderDealsTable() {
+    const tbody = document.querySelector('.deals-table tbody');
+    if (!tbody) return;
+    
+    let filteredDeals = [...dealsInProgressData.deals];
+    if (currentDealFilter !== 'all') {
+        filteredDeals = filteredDeals.filter(d => d.durationCategory === currentDealFilter);
+    }
+    
+    const totalPages = Math.ceil(filteredDeals.length / dealsPerPage);
+    const start = (currentDealPage - 1) * dealsPerPage;
+    const pageDeals = filteredDeals.slice(start, start + dealsPerPage);
+    
+    if (pageDeals.length === 0) {
+        tbody.innerHTML = `<tr><td colspan="6" style="text-align:center;padding:40px;">Нет сделок в процессе</td></tr>`;
+        return;
+    }
+    
+    tbody.innerHTML = pageDeals.map(deal => {
+        const days = deal.daysInProgress;
+        const dc = days > 30 ? 'critical' : (days > 14 ? 'warning' : (days < 7 ? 'fresh' : 'normal'));
+        const mgr = currentManagers.find(m => String(m.id) === String(deal.ASSIGNED_BY_ID));
+        const mgrPhoto = mgr?.photo ? `background-image:url('${mgr.photo}');background-size:cover;background-position:center;` : '';
+        const mgrName  = mgr ? mgr.name.split(' ')[0] : `ID${deal.ASSIGNED_BY_ID || '?'}`;
+        const mgrInit  = mgr ? mgr.name.split(' ').map(n=>n[0]).join('').slice(0,2) : (deal.ASSIGNED_BY_ID || '?');
+        return `<tr style="cursor:pointer;" onclick="window.open('https://robotcorporation.bitrix24.ru/crm/deal/details/${deal.ID}/','_blank')">
+            <td class="deal-name"><span class="deal-id">#${deal.ID}</span>${escapeHtml(deal.TITLE)}</td>
+            <td style="font-size:0.8125rem;color:var(--text-secondary);">${escapeHtml(deal.TITLE)}</td>
+            <td><div style="display:flex;align-items:center;gap:6px;"><div class="cell-avatar" style="${mgrPhoto}">${mgrPhoto ? '' : mgrInit}</div><span>${escapeHtml(mgrName)}</span></div></td>
+            <td><span class="stage-badge">${escapeHtml(deal.stageName || deal.STAGE_ID)}</span></td>
+            <td class="deal-amount">${fmtMoney(deal.OPPORTUNITY)}</td>
+            <td><span class="duration ${dc}">${days} дн.</span></td>
+        </tr>`;
+    }).join('');
+    
+    // Пагинация
+    let pg = document.querySelector('.deals-pagination');
+    if (!pg) {
+        pg = document.createElement('div');
+        pg.className = 'deals-pagination';
+        const sm = document.querySelector('.deals-summary');
+        if (sm) sm.parentNode.insertBefore(pg, sm);
+    }
+    pg.style.cssText = 'display:flex;justify-content:center;align-items:center;gap:8px;padding:12px;border-top:1px solid var(--border-color);';
+    pg.innerHTML = pgHTML(currentDealPage, totalPages, 'changeDealPage');
+}
+
+function changeDealPage(dir) {
+    let filteredCount = dealsInProgressData.deals.length;
+    if (currentDealFilter !== 'all') {
+        filteredCount = dealsInProgressData.deals.filter(d => d.durationCategory === currentDealFilter).length;
+    }
+    const totalPages = Math.ceil(filteredCount / dealsPerPage);
+    currentDealPage = Math.max(1, Math.min(currentDealPage + dir, totalPages));
+    renderDealsTable();
+}
+
+function escapeHtml(str) {
+    if (!str) return '';
+    return str.replace(/[&<>]/g, function(m) {
+        if (m === '&') return '&amp;';
+        if (m === '<') return '&lt;';
+        if (m === '>') return '&gt;';
+        return m;
+    });
+}
 
 // ── Init ──────────────────────────────────────────────────────
 function detectBitrixContext() {
@@ -71,11 +214,10 @@ function restartOnboarding() {
 }
 
 document.addEventListener('DOMContentLoaded', () => {
-    // Скелетоны
     document.querySelectorAll('.kpi-value').forEach(el => el.classList.add('skeleton'));
     document.querySelectorAll('.kpi-change span').forEach(el => el.classList.add('skeleton'));
     showSourcesSkeleton();
-    showDealsSkeleton();
+    showDealsSkeleton(); // скелетон для таблицы сделок (независимый)
 
     initNavButtons();
     initFunnelSelect();
@@ -89,7 +231,6 @@ document.addEventListener('DOMContentLoaded', () => {
     updateDateRangeDisplay('month');
 
     initBitrix24();
-    // Всегда запускаем — BX24.init только обогащает доменом
     initAll();
 });
 
@@ -100,6 +241,7 @@ function initAll() {
     fetchSources(sourcesPeriod);
     fetchManagers(mgrPeriod);
     fetchChannels(chnPeriod);
+    fetchDealsInProgress();
 }
 
 // ── API helper ────────────────────────────────────────────────
@@ -119,8 +261,7 @@ function periodDates(period) {
     return { from: from.toISOString().split('T')[0], to: today.toISOString().split('T')[0] };
 }
 
-// ── Fetch functions — each widget is independent ───────────────
-
+// ── Fetch functions ───────────────────────────────────────────
 async function fetchKPI(period) {
     kpiPeriod = period;
     updateDateRangeDisplay(period);
@@ -128,32 +269,13 @@ async function fetchKPI(period) {
         const res = await fetch(apiUrl(period));
         const d = await res.json();
         if (d.error) return;
-        // KPI
         setKPI('.kpi-card.revenue .kpi-value', d.revenue, '', ' ₽');
         setKPI('.kpi-card.leads .kpi-value', d.leadsCount);
-        setKPI('.kpi-card.deals .kpi-value', d.dealsInProgressCount);
-        if (d.conversionRate !== undefined) setKPI('.kpi-card.conversion .kpi-value', d.conversionRate, '', '%');
+        setKPI('.kpi-card.conversion .kpi-value', d.conversionRate, '', '%');
         if (d.changes) {
             setKPIChange('.kpi-card.revenue', d.changes.revenue);
             setKPIChange('.kpi-card.leads', d.changes.leadsCount);
             setKPIChange('.kpi-card.conversion', d.changes.conversionRate);
-            setKPIChange('.kpi-card.deals', d.changes.dealsInProgress);
-        }
-        // Deals table — tied to KPI period
-        if (d.dealsInProgress && d.dealsInProgress.length > 0) {
-            currentDeals = d.dealsInProgress;
-            currentPage = 1;
-            renderDealsTable(filterDeals(d.dealsInProgress, currentDealFilter));
-        }
-        // Indicators
-        if (d.dealsInProgress) {
-            const hot  = d.dealsInProgress.filter(x => x.daysInProgress < 7).length;
-            const warm = d.dealsInProgress.filter(x => x.daysInProgress >= 7 && x.daysInProgress <= 30).length;
-            const cold = d.dealsInProgress.filter(x => x.daysInProgress > 30).length;
-            const inds = document.querySelectorAll('.indicator-item span:last-child');
-            if (inds[0]) inds[0].textContent = `${hot} горячих`;
-            if (inds[1]) inds[1].textContent = `${warm} в процессе`;
-            if (inds[2]) inds[2].textContent = `${cold} стагнирующих`;
         }
     } catch(e) { console.error('fetchKPI', e); }
 }
@@ -182,7 +304,6 @@ async function fetchSources(period) {
             window._sourcesAll   = d.sources;
             window._sourcesDeals = d.dealsInProgress || [];
             applySourcesType();
-            // rejected count
             const rej = (d.dealsInProgress||[]).filter(x =>
                 x.stageName==='Спам'||x.stageName==='Потребность исчезла'||
                 (x.STAGE_ID&&(x.STAGE_ID==='LOSE'||x.STAGE_ID.includes('JUNK')))).length;
@@ -210,10 +331,10 @@ function applySourcesType() {
     }
 }
 
+// В функции fetchManagers, после получения данных:
 async function fetchManagers(period) {
     mgrPeriod = period;
     setBtnActive('.mgr-period-btn', period);
-    // Show skeleton
     const container = document.querySelector('.managers-card .managers-list');
     if (container) container.innerHTML = '<div style="padding:24px;text-align:center;color:var(--text-secondary);">Загрузка...</div>';
     try {
@@ -223,6 +344,8 @@ async function fetchManagers(period) {
             currentManagers = d.managers;
             dashMgrPage = 1;
             renderManagersWidget(sortMgr(d.managers, currentManagerSort));
+            // ✅ После загрузки менеджеров обновляем таблицу сделок (аватарки)
+            renderDealsTable();
         }
     } catch(e) {}
 }
@@ -230,7 +353,6 @@ async function fetchManagers(period) {
 async function fetchChannels(period) {
     chnPeriod = period;
     setBtnActive('.chn-period-btn', period);
-    // Show skeleton (п.13)
     const chnContainer = document.getElementById('channels-container');
     if (chnContainer) chnContainer.innerHTML = `<div style="display:flex;flex-direction:column;gap:16px;padding:8px 0;">${Array(5).fill('<div style="display:grid;grid-template-columns:280px 1fr;gap:24px;align-items:center;"><div class="skeleton" style="height:44px;border-radius:8px;"></div><div class="skeleton" style="height:32px;border-radius:8px;"></div></div>').join('')}</div>`;
     try {
@@ -291,11 +413,9 @@ function initNavButtons() {
         btn.addEventListener('click', () => {
             document.querySelectorAll('.main-kpi-btn').forEach(b => b.classList.remove('active'));
             btn.classList.add('active');
-            // Скелетоны на KPI, источники и сделки при смене периода
             document.querySelectorAll('.kpi-value').forEach(el => el.classList.add('skeleton'));
             document.querySelectorAll('.kpi-change span').forEach(el => el.classList.add('skeleton'));
             showSourcesSkeleton();
-            showDealsSkeleton();
             fetchKPI(btn.dataset.period);
         });
     });
@@ -342,7 +462,6 @@ function initChannelsMetric() {
 function setKPI(sel, val, pre='', suf='') {
     const el = document.querySelector(sel);
     if (el) { el.classList.remove('skeleton'); el.textContent = pre + fmt(val) + suf; }
-    // Hide sparkline if revenue is 0 or negative (п.5)
     if (sel.includes('revenue')) {
         const sparkline = document.querySelector('.kpi-card.revenue .kpi-sparkline');
         if (sparkline) sparkline.style.opacity = (parseFloat(val)||0) <= 0 ? '0' : '0.6';
@@ -497,72 +616,10 @@ function sortMgr(managers, by) {
     });
 }
 
-// ── Deals table ───────────────────────────────────────────────
+// ── Deals table skeleton (only for initial loading) ──────────
 function showDealsSkeleton() {
     const tbody = document.querySelector('.deals-table tbody');
-    if (tbody) tbody.innerHTML = Array(5).fill(`<tr>${['140','60','40','80','70','50'].map(w=>`<td><div class="skeleton" style="height:14px;width:${w}px;border-radius:4px;"></div></td>`).join('')}</tr>`).join('');
-}
-
-function filterDeals(deals, filter) {
-    if (filter==='all') return deals;
-    return deals.filter(d => {
-        const days = d.daysInProgress||0;
-        if (filter==='fresh')    return days<7;
-        if (filter==='normal')   return days>=7&&days<=14;
-        if (filter==='warning')  return days>14&&days<=30;
-        if (filter==='critical') return days>30;
-        return true;
-    });
-}
-
-function filterDealsByDuration(filter) {
-    currentDealFilter = filter;
-    document.querySelectorAll('.duration-badge').forEach(b => b.style.opacity = b.dataset.filter===filter?'1':'0.5');
-    if (currentDeals.length) renderDealsTable(filterDeals(currentDeals, filter));
-}
-
-function renderDealsTable(deals) {
-    const tbody = document.querySelector('.deals-table tbody');
-    if (!tbody) return;
-    const totalPages = Math.ceil(deals.length/dealsPerPage);
-    const start = (currentPage-1)*dealsPerPage;
-    const page  = deals.slice(start, start+dealsPerPage);
-
-    tbody.innerHTML = page.map(deal => {
-        const days = deal.daysInProgress||0;
-        const dc = days>30?'critical':days>14?'warning':days<7?'fresh':'normal';
-        const mgr = currentManagers.find(m => String(m.id)===String(deal.ASSIGNED_BY_ID));
-        const mgrPhoto = mgr?.photo ? `background-image:url('${mgr.photo}');background-size:cover;background-position:center;` : '';
-        const mgrName  = mgr ? mgr.name.split(' ')[0] : `ID${deal.ASSIGNED_BY_ID||'?'}`;
-        const mgrInit  = mgr ? mgr.name.split(' ').map(n=>n[0]).join('').slice(0,2) : (deal.ASSIGNED_BY_ID||'?');
-        return `<tr style="cursor:pointer;" onclick="window.open('https://robotcorporation.bitrix24.ru/crm/deal/details/${deal.ID}/','_blank')">
-            <td class="deal-name"><span class="deal-id">#${deal.ID}</span>${deal.TITLE||'Без названия'}</td>
-            <td style="font-size:0.8125rem;color:var(--text-secondary);max-width:120px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">${deal.TITLE||'—'}</td>
-            <td><div style="display:flex;align-items:center;gap:6px;"><div class="cell-avatar" style="${mgrPhoto}">${mgrPhoto?'':mgrInit}</div><span style="font-size:0.75rem;color:var(--text-secondary);">${mgrName}</span></div></td>
-            <td><span class="stage-badge">${deal.stageName||deal.STAGE_ID}</span></td>
-            <td class="deal-amount">${fmtMoney(parseFloat(deal.OPPORTUNITY)||0)}</td>
-            <td><span class="duration ${dc}">${days} дн.</span></td>
-        </tr>`;
-    }).join('');
-
-    let pg = document.querySelector('.deals-pagination');
-    if (!pg) { pg = document.createElement('div'); pg.className = 'deals-pagination'; const sm=document.querySelector('.deals-summary'); if(sm) sm.parentNode.insertBefore(pg,sm); }
-    pg.style.cssText = 'display:flex;justify-content:center;align-items:center;gap:8px;padding:12px;border-top:1px solid var(--border-color);';
-    pg.innerHTML = pgHTML(currentPage, totalPages, 'changeDealPage');
-
-    const sv = document.querySelectorAll('.deals-summary .summary-value');
-    if (sv.length>=3) {
-        const sum = currentDeals.reduce((s,d)=>s+parseFloat(d.OPPORTUNITY||0),0);
-        const avg = currentDeals.length ? Math.round(currentDeals.reduce((s,d)=>s+(d.daysInProgress||0),0)/currentDeals.length) : 0;
-        sv[0].textContent = currentDeals.length;
-        sv[1].textContent = fmtMoney(Math.round(sum/1000000*10)/10)+' M';
-        sv[2].textContent = avg;
-    }
-}
-
-function changeDealPage(dir) {
-    currentPage = Math.max(1, Math.min(currentPage+dir, Math.ceil(currentDeals.length/dealsPerPage)));
-    renderDealsTable(filterDeals(currentDeals, currentDealFilter));
+    if (tbody) tbody.innerHTML = Array(5).fill(`<td>${['140','60','40','80','70','50'].map(w=>`<td><div class="skeleton" style="height:14px;width:${w}px;border-radius:4px;"></div></td>`).join('')}</tr>`).join('');
 }
 
 // ── Channels ──────────────────────────────────────────────────
@@ -764,7 +821,6 @@ function loadKnowledgePage() {
     c.innerHTML=`<div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(300px,1fr));gap:16px;">${arts.map(s=>`<div class="chart-card"><h3 style="margin-bottom:16px;">${s.cat}</h3><div style="display:flex;flex-direction:column;gap:8px;">${s.items.map(i=>`<div style="padding:10px 14px;background:var(--bg-tertiary);border-radius:var(--radius-md);cursor:pointer;font-size:0.875rem;" onmouseover="this.style.background='var(--bg-card-hover)'" onmouseout="this.style.background='var(--bg-tertiary)'">📄 ${i}</div>`).join('')}</div></div>`).join('')}</div>`;
 }
 
-// ── Refresh ───────────────────────────────────────────────────
 function initRefreshButton() {
     const btn = document.querySelector('.refresh-btn');
     if (!btn) return;
@@ -773,15 +829,17 @@ function initRefreshButton() {
         if (cd) return;
         cd = true; btn.disabled = true;
         const svg = btn.querySelector('svg');
-        svg.style.transition='transform 0.8s linear'; svg.style.transform='rotate(360deg)';
-        showSourcesSkeleton(); showDealsSkeleton();
+        svg.style.transition = 'transform 0.8s linear';
+        svg.style.transform = 'rotate(360deg)';
+        showSourcesSkeleton();
         await fetchKPI(kpiPeriod);
         await fetchFunnel(funnelPeriod, funnelCategory);
         await fetchSources(sourcesPeriod);
         await fetchManagers(mgrPeriod);
         await fetchChannels(chnPeriod);
-        setTimeout(()=>{svg.style.transition='none';svg.style.transform='rotate(0deg)';},800);
-        setTimeout(()=>{cd=false;btn.disabled=false;},3000);
+        await fetchDealsInProgress();   // <--- обновление сделок только по кнопке
+        setTimeout(() => { svg.style.transition = 'none'; svg.style.transform = 'rotate(0deg)'; }, 800);
+        setTimeout(() => { cd = false; btn.disabled = false; }, 3000);
     });
 }
 
@@ -802,7 +860,6 @@ function fmt(num) {
 }
 function fmtMoney(num) {
     const n = parseFloat(num)||0;
-    // Формат: 248 192,00 руб.
     return n.toLocaleString('ru-RU', {
         minimumFractionDigits: 2,
         maximumFractionDigits: 2
@@ -823,7 +880,7 @@ function updateDateRangeDisplay(period) {
     else { const f=new Date(today);f.setMonth(today.getMonth()-1);el.textContent=`${fmtDate(f)} — ${fmtDate(today)}`; }
 }
 
-// Stubs
+// Stubs (для совместимости)
 function initAnimations() {}
 function animateCounters() {}
 function animateDataRefresh() {}
@@ -839,7 +896,6 @@ function bxNavClick(btn, page) {
     btn.classList.add('active');
     if (page === 'onboarding') {
         restartOnboarding();
-        // Вернуть кнопку Дашборд в активное
         setTimeout(() => {
             document.querySelectorAll('.bx-nav-btn').forEach(b => {
                 b.classList.toggle('active', b.dataset.page === 'dashboard');
@@ -847,7 +903,6 @@ function bxNavClick(btn, page) {
         }, 100);
         return;
     }
-    // Синхронизируем боковое меню
     document.querySelectorAll('.nav-item').forEach(n => {
         n.classList.toggle('active', n.dataset.page === page);
     });

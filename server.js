@@ -11,6 +11,84 @@ app.use(express.json());
 app.use(express.urlencoded({ extended: false }));
 app.use(express.static(__dirname));
 
+// server.js – добавьте в начало файла (после require)
+
+// Списки стадий для определения статуса сделки
+const SUCCESS_STAGES = [
+    "Заявки на рассылку", "Квалифицирован", "NPS собран",
+    "Экскурсия проведена", "День рождения проведен"
+];
+const FAIL_STAGES = [
+    "Выбрали что-то другое", "Не подошли условия",
+    "Не отвечает более 3х раз", "Запрос в техподдержку закрыт", "Спам",
+    "Потребность исчезла",
+];
+
+// НОВЫЙ ЭНДПОИНТ – НЕ ЗАВИСИТ ОТ ПАРАМЕТРОВ ДАТЫ
+app.get('/api/deals/in-progress', async (req, res) => {
+    try {
+        const client = getClient(req);
+        
+        // Ограничение: только сделки, созданные не более 10 дней назад
+        const tenDaysAgo = new Date();
+        tenDaysAgo.setDate(tenDaysAgo.getDate() - 10);
+        const dateFilter = { '>=DATE_CREATE': tenDaysAgo.toISOString().split('T')[0] };
+
+        const allDeals = await getAll(client, 'crm.deal.list', {
+            filter: dateFilter,
+            select: ['ID', 'TITLE', 'OPPORTUNITY', 'ASSIGNED_BY_ID', 'DATE_CREATE', 'STAGE_ID', 'CATEGORY_ID', 'SEMANTIC']
+        });
+
+        // Получаем названия стадий для всех воронок
+        const stageMap = {};
+        const commonStages = await client.call('crm.dealcategory.stage.list', { id: 0 });
+        if (commonStages.result) commonStages.result.forEach(s => { stageMap[s.STATUS_ID] = s.NAME; });
+        const categories = await client.call('crm.dealcategory.list');
+        if (categories.result) {
+            for (const cat of categories.result) {
+                const catStages = await client.call('crm.dealcategory.stage.list', { id: cat.ID });
+                if (catStages.result) catStages.result.forEach(s => { stageMap[s.STATUS_ID] = s.NAME; });
+            }
+        }
+
+        const now = new Date();
+        const dealsInProgress = [];
+        let totalAmount = 0;
+        const categoryCounts = { fresh: 0, normal: 0, warning: 0, critical: 0 };
+
+        for (const deal of allDeals.result) {
+            const stageName = stageMap[deal.STAGE_ID] || deal.STAGE_ID;
+            let isSuccess = ["Заявки на рассылку","Квалифицирован","NPS собран","Экскурсия проведена","День рождения проведен"].includes(stageName);
+            let isFail = ["Выбрали что-то другое","Не подошли условия","Не отвечает более 3х раз","Запрос в техподдержку закрыт","Спам"].includes(stageName);
+            if (!isSuccess && !isFail && deal.SEMANTIC) {
+                isSuccess = (deal.SEMANTIC === 'S');
+                isFail = (deal.SEMANTIC === 'F');
+            }
+            if (isSuccess || isFail) continue;
+
+            const created = new Date(deal.DATE_CREATE);
+            const daysInProgress = Math.floor((now - created) / (1000 * 60 * 60 * 24));
+            let durationCategory = '';
+            if (daysInProgress < 7) { durationCategory = 'fresh'; categoryCounts.fresh++; }
+            else if (daysInProgress < 14) { durationCategory = 'normal'; categoryCounts.normal++; }
+            else if (daysInProgress < 30) { durationCategory = 'warning'; categoryCounts.warning++; }
+            else { durationCategory = 'critical'; categoryCounts.critical++; }
+
+            totalAmount += parseFloat(deal.OPPORTUNITY) || 0;
+            dealsInProgress.push({
+                ID: deal.ID, TITLE: deal.TITLE || 'Без названия', OPPORTUNITY: parseFloat(deal.OPPORTUNITY) || 0,
+                ASSIGNED_BY_ID: deal.ASSIGNED_BY_ID, DATE_CREATE: deal.DATE_CREATE, STAGE_ID: deal.STAGE_ID,
+                stageName: stageName, daysInProgress: daysInProgress, durationCategory: durationCategory
+            });
+        }
+
+        res.json({ deals: dealsInProgress, total: dealsInProgress.length, totalAmount: totalAmount, categories: categoryCounts });
+    } catch (e) {
+        console.error('[API Deals Error]', e.message);
+        res.status(500).json({ error: e.message });
+    }
+});
+
 // Функция для получения всех записей с пагинацией
 async function getAll(client, method, params = {}) {
     let allItems = [];
