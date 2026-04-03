@@ -227,6 +227,15 @@ async function fetchDealsInProgress() {
         const data = await res.json();
         if (data.error) { console.error('Deals error:', data.error); return; }
         dealsInProgressData = data;
+        // If currentManagers is still empty (e.g. page just loaded),
+        // fetch managers first so avatars render correctly
+        if (currentManagers.length === 0) {
+            try {
+                const mr = await fetch(buildUrl('/api/managers', { period: mgrPeriod }));
+                const md = await mr.json();
+                if (md.managers && md.managers.length > 0) currentManagers = md.managers;
+            } catch(e) {}
+        }
         updateDealsWidget();
     } catch(e) { console.error('fetchDealsInProgress', e); }
 }
@@ -513,12 +522,15 @@ async function fetchManagers(period) {
     try {
         const res = await fetch(buildUrl('/api/managers', { period: period }));
         const d   = await res.json();
-        if (d.managers) {
+        if (d.managers && d.managers.length > 0) {
             currentManagers = d.managers;
-            dashMgrPage = 1;
-            renderManagersWidget(sortMgr(d.managers, currentManagerSort));
-            renderDealsTable();
         }
+        // Always render — even if managers list is empty for today,
+        // currentManagers retains the 30-day roster from the server response.
+        // The server now always returns the full roster, so d.managers is never empty.
+        dashMgrPage = 1;
+        renderManagersWidget(sortMgr(currentManagers, currentManagerSort));
+        renderDealsTable(); // refresh avatars with up-to-date manager data
     } catch(e) { console.error('fetchManagers', e); }
 }
 

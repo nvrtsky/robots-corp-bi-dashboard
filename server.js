@@ -359,24 +359,31 @@ app.get('/api/sources', async (req, res) => {
 });
 
 // ── Endpoint 5: Managers ──────────────────────────────────────
-// Revenue = sum of OPPORTUNITY for SUCCESS_STAGES deals in period
-// Shows ALL managers (including those with 0 revenue)
+// Revenue/deals stats for the SELECTED period.
+// Roster (who exists) is always built from last 30 days so that
+// managers with 0 activity today are still shown (alphabetically, revenue=0).
 app.get('/api/managers', async (req, res) => {
     try {
         const client = getClient(req);
-        const { period = 'month', categoryId } = req.query;
+        const { period = 'day', categoryId } = req.query;
         const { from, to } = parsePeriod(period);
         const catFilter = categoryId && categoryId !== 'all' ? { CATEGORY_ID: categoryId } : {};
 
+        // Roster window: always last 30 days regardless of selected period
+        const rosterFrom = new Date();
+        rosterFrom.setMonth(rosterFrom.getMonth() - 1);
+        const rosterFromStr = rosterFrom.toISOString().split('T')[0];
+        const todayStr      = new Date().toISOString().split('T')[0];
+
         const successStageIds = await getSuccessStageIds(client);
 
-        const [allDeals, successDeals] = await Promise.all([
-            // All deals to gather list of all manager IDs
+        const [rosterDeals, successDeals] = await Promise.all([
+            // Roster: all deals from last 30 days → gives us the full set of manager IDs
             getAll(client, 'crm.deal.list', {
-                filter: { '>=DATE_CREATE': from, '<=DATE_CREATE': to, ...catFilter },
+                filter: { '>=DATE_CREATE': rosterFromStr, '<=DATE_CREATE': todayStr, ...catFilter },
                 select: ['ID', 'ASSIGNED_BY_ID']
             }),
-            // Success deals for revenue calculation
+            // Stats: success deals in the SELECTED period only
             successStageIds.length > 0
                 ? getAll(client, 'crm.deal.list', {
                     filter: { STAGE_ID: successStageIds, '>=DATE_CREATE': from, '<=DATE_CREATE': to, ...catFilter },
@@ -385,7 +392,7 @@ app.get('/api/managers', async (req, res) => {
                 : Promise.resolve({ result: [] })
         ]);
 
-        // Revenue stats from success deals
+        // Revenue/count stats for selected period
         const managerStats = {};
         successDeals.result.forEach(deal => {
             const id = String(deal.ASSIGNED_BY_ID || 'unknown');
@@ -394,9 +401,9 @@ app.get('/api/managers', async (req, res) => {
             managerStats[id].revenue += parseFloat(deal.OPPORTUNITY || 0);
         });
 
-        // Collect ALL responsible (include those with zero revenue)
+        // Build full ID set from 30-day roster (guarantees managers always appear)
         const allIds = new Set();
-        allDeals.result.forEach(d => { if (d.ASSIGNED_BY_ID) allIds.add(String(d.ASSIGNED_BY_ID)); });
+        rosterDeals.result.forEach(d => { if (d.ASSIGNED_BY_ID) allIds.add(String(d.ASSIGNED_BY_ID)); });
         Object.keys(managerStats).forEach(id => allIds.add(id));
 
         const managerIds = Array.from(allIds).filter(id => id !== 'unknown');
@@ -418,7 +425,11 @@ app.get('/api/managers', async (req, res) => {
                         deals:  stats.count,
                         revenue: stats.revenue
                     };
-                }).sort((a, b) => b.revenue - a.revenue);
+                }).sort((a, b) => {
+                    // Non-zero revenue first (desc), then zero entries alphabetically
+                    if (b.revenue !== a.revenue) return b.revenue - a.revenue;
+                    return a.name.localeCompare(b.name, 'ru');
+                });
             } catch (e) {
                 managers = managerIds.map(id => ({
                     id, name: `Менеджер ${id}`, photo: null,
