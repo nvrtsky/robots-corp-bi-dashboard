@@ -67,16 +67,23 @@ async function getSuccessStageIds(client) {
     return Object.keys(stageMap).filter(id => SUCCESS_STAGES.includes(stageMap[id]));
 }
 
-/** Compute date range from period string. Always caps at last month max. */
+/** Compute date range from period string.
+ *  day   = from 00:00 today (current day only)
+ *  week  = last 7 days
+ *  month = last 30 days
+ */
 function parsePeriod(period) {
     const today = new Date();
+    const todayStr = today.toISOString().split('T')[0];
+    if (period === 'day') {
+        return { from: todayStr, to: todayStr };
+    }
     const from = new Date();
-    if (period === 'day')   from.setDate(today.getDate() - 1);
-    else if (period === 'week') from.setDate(today.getDate() - 7);
-    else from.setMonth(today.getMonth() - 1); // month (default)
+    if (period === 'week') from.setDate(today.getDate() - 7);
+    else from.setMonth(today.getMonth() - 1);
     return {
         from: from.toISOString().split('T')[0],
-        to:   today.toISOString().split('T')[0]
+        to:   todayStr
     };
 }
 
@@ -294,7 +301,10 @@ app.get('/api/funnel', async (req, res) => {
             }
         }
 
+        // Pre-populate ALL stages with 0 so empty stages still appear
+        // Preserve pipeline order from stageMap (insertion order = Bitrix sort order)
         const funnelData = {};
+        Object.values(stageMap).forEach(name => { funnelData[name] = 0; });
         allDeals.result.forEach(deal => {
             const name = stageMap[deal.STAGE_ID] || deal.STAGE_ID;
             funnelData[name] = (funnelData[name] || 0) + 1;
@@ -307,35 +317,41 @@ app.get('/api/funnel', async (req, res) => {
     }
 });
 
-// ── Endpoint 4: Sources (all channels, no filtering) ──────────
-// Always uses crm.lead.list for SOURCE_ID breakdown
+// ── Endpoint 4: Sources ──────────────────────────────────────
+// Queries crm.deal.list (not lead.list — leads not used here).
+// Always returns ALL known source types, even with 0 count.
 app.get('/api/sources', async (req, res) => {
     try {
         const client = getClient(req);
-        const { period = 'month' } = req.query;
+        const { period = 'day' } = req.query;
         const { from, to } = parsePeriod(period);
 
-        const [leads, sourceStatuses] = await Promise.all([
-            getAll(client, 'crm.lead.list', {
+        const [deals, sourceStatuses] = await Promise.all([
+            getAll(client, 'crm.deal.list', {
                 filter: { '>=DATE_CREATE': from, '<=DATE_CREATE': to },
                 select: ['ID', 'SOURCE_ID']
             }),
             client.call('crm.status.list', { filter: { ENTITY_ID: 'SOURCE' } })
         ]);
 
+        // Build name map
         const sourceNames = {};
         if (sourceStatuses.result) {
             sourceStatuses.result.forEach(s => { sourceNames[s.STATUS_ID] = s.NAME; });
         }
 
+        // Pre-populate ALL known sources with 0
         const sources = {};
-        leads.result.forEach(lead => {
-            const key  = lead.SOURCE_ID || 'OTHER';
+        Object.values(sourceNames).forEach(name => { sources[name] = 0; });
+
+        // Count actual deal sources
+        deals.result.forEach(deal => {
+            const key  = deal.SOURCE_ID || 'OTHER';
             const name = sourceNames[key] || key;
             sources[name] = (sources[name] || 0) + 1;
         });
 
-        res.json({ sources, total: leads.total });
+        res.json({ sources, total: deals.total });
     } catch (e) {
         console.error('[Sources Error]', e.message);
         res.status(500).json({ error: e.message });
@@ -419,15 +435,16 @@ app.get('/api/managers', async (req, res) => {
     }
 });
 
-// ── Endpoint 6: Channels (same data as Sources, for bar chart) ─
+// ── Endpoint 6: Channels (same logic as Sources) ─────────────
+// Always returns ALL known sources, even with 0 count.
 app.get('/api/channels', async (req, res) => {
     try {
         const client = getClient(req);
-        const { period = 'month' } = req.query;
+        const { period = 'day' } = req.query;
         const { from, to } = parsePeriod(period);
 
-        const [leads, sourceStatuses] = await Promise.all([
-            getAll(client, 'crm.lead.list', {
+        const [deals, sourceStatuses] = await Promise.all([
+            getAll(client, 'crm.deal.list', {
                 filter: { '>=DATE_CREATE': from, '<=DATE_CREATE': to },
                 select: ['ID', 'SOURCE_ID']
             }),
@@ -439,14 +456,17 @@ app.get('/api/channels', async (req, res) => {
             sourceStatuses.result.forEach(s => { sourceNames[s.STATUS_ID] = s.NAME; });
         }
 
+        // Pre-populate ALL known sources with 0
         const sources = {};
-        leads.result.forEach(lead => {
-            const key  = lead.SOURCE_ID || 'OTHER';
+        Object.values(sourceNames).forEach(name => { sources[name] = 0; });
+
+        deals.result.forEach(deal => {
+            const key  = deal.SOURCE_ID || 'OTHER';
             const name = sourceNames[key] || key;
             sources[name] = (sources[name] || 0) + 1;
         });
 
-        res.json({ sources, total: leads.total });
+        res.json({ sources, total: deals.total });
     } catch (e) {
         console.error('[Channels Error]', e.message);
         res.status(500).json({ error: e.message });

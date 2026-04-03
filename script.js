@@ -127,8 +127,8 @@ function initAll() {
 
 // ── Skeleton helpers ───────────────────────────────────────────
 function showAllSkeletons() {
-    // KPI (not deals — it's independent)
-    ['revenue','leads','conversion'].forEach(function(cls) {
+    // KPI cards — revenue, leads, conversion + deals
+    ['revenue','leads','conversion','deals'].forEach(function(cls) {
         const v = document.querySelector('.kpi-card.' + cls + ' .kpi-value');
         const c = document.querySelector('.kpi-card.' + cls + ' .kpi-change span');
         if (v) v.classList.add('skeleton');
@@ -155,9 +155,22 @@ function showAllSkeletons() {
         '<div class="skeleton" style="height:6px;width:80px;border-radius:3px;"></div>' +
         '</div>').join('');
     const dt = document.getElementById('donut-total');
-    if (dt) dt.textContent = '-';
+    if (dt) dt.textContent = '';
     const donutSvg = document.getElementById('donut-svg');
-    if (donutSvg) donutSvg.querySelectorAll('.dyn-seg').forEach(function(s) { s.remove(); });
+    if (donutSvg) {
+        donutSvg.querySelectorAll('.dyn-seg').forEach(function(s) { s.remove(); });
+        // Add a full grey placeholder circle
+        if (!donutSvg.querySelector('.skeleton-ring')) {
+            const skRing = document.createElementNS('http://www.w3.org/2000/svg','circle');
+            skRing.setAttribute('class','skeleton-ring dyn-seg');
+            skRing.setAttribute('cx','60'); skRing.setAttribute('cy','60'); skRing.setAttribute('r','45');
+            skRing.setAttribute('fill','none'); skRing.setAttribute('stroke-width','20');
+            skRing.setAttribute('stroke','var(--bg-tertiary,#ebeef2)');
+            skRing.setAttribute('stroke-dasharray','283'); skRing.setAttribute('stroke-dashoffset','0');
+            const hole = donutSvg.querySelector('.donut-hole');
+            if (hole) donutSvg.insertBefore(skRing, hole); else donutSvg.appendChild(skRing);
+        }
+    }
 
     // Managers
     const mgrList = document.querySelector('.managers-card .managers-list');
@@ -330,7 +343,8 @@ async function fetchFunnel(period, category) {
 }
 
 function renderFunnelChart(funnel) {
-    lastFunnelData = Object.fromEntries(Object.entries(funnel).sort(function(a,b) { return b[1]-a[1]; }));
+    // Keep pipeline order from server (Bitrix stage sort order), don't re-sort by count
+    lastFunnelData = funnel;
     funnelPage = 1;
     drawFunnel();
 }
@@ -383,7 +397,40 @@ async function fetchSources(period) {
 
 function renderDonut(sources) {
     const total = Object.values(sources).reduce(function(a,b) { return a+b; }, 0);
-    if (!total) return;
+
+    // Always update donut total (0 is valid)
+    const elTotal = document.getElementById('donut-total');
+    if (elTotal) elTotal.textContent = fmt(total);
+
+    if (!total) {
+        // Grey ring + empty legend rows with 0
+        const svg = document.getElementById('donut-svg');
+        if (svg) {
+            svg.querySelectorAll('.dyn-seg').forEach(function(s) { s.remove(); });
+            const ring = document.createElementNS('http://www.w3.org/2000/svg','circle');
+            ring.setAttribute('class','dyn-seg');
+            ring.setAttribute('cx','60'); ring.setAttribute('cy','60'); ring.setAttribute('r','45');
+            ring.setAttribute('fill','none'); ring.setAttribute('stroke-width','20');
+            ring.setAttribute('stroke','var(--bg-tertiary,#ebeef2)');
+            ring.setAttribute('stroke-dasharray','283'); ring.setAttribute('stroke-dashoffset','0');
+            const hole = svg.querySelector('.donut-hole');
+            if (hole) svg.insertBefore(ring, hole); else svg.appendChild(ring);
+        }
+        const legend = document.getElementById('sources-legend');
+        if (legend && Object.keys(sources).length) {
+            legend.innerHTML = Object.keys(sources).slice(0,5).map(function(name, i) {
+                const colors = ['#6366f1','#2fc6f6','#ffa900','#9dcf00','#ec4899'];
+                const color = colors[i % colors.length];
+                return '<div class="source-item">'
+                    + '<div style="width:12px;height:12px;border-radius:3px;background:' + color + ';flex-shrink:0;opacity:0.3;"></div>'
+                    + '<div class="source-info"><span class="source-name">' + name + '</span>'
+                    + '<span class="source-stat" style="color:var(--text-tertiary)">0 (0%)</span></div>'
+                    + '<div class="source-bar"><div class="source-fill" style="width:0%;background:' + color + '"></div></div>'
+                    + '</div>';
+            }).join('');
+        }
+        return;
+    }
 
     const colors  = ['#6366f1','#2fc6f6','#ffa900','#9dcf00','#ec4899','#14b8a6','#ff5752','#ab7fe6'];
     const entries = Object.entries(sources);
@@ -395,8 +442,7 @@ function renderDonut(sources) {
     sourcesPage = 1;
 
     // Update donut total
-    const el = document.getElementById('donut-total');
-    if (el) el.textContent = fmt(total);
+    // donut-total already set above
 
     // Draw full donut SVG (all segments)
     const circ = 2 * Math.PI * 45;
@@ -547,16 +593,23 @@ const CHN_ICON = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" str
 const CHN_COLORS = ['#2fc6f6','#ffa900','#9dcf00','#ff5752','#ab7fe6','#ec4899','#14b8a6','#6366f1'];
 
 function renderChannels(sources) {
-    allChannelsSorted = Object.entries(sources).sort(function(a,b) { return b[1]-a[1]; });
+    // Sort: non-zero first (by count desc), then zero entries alphabetically
+    const nonZero = Object.entries(sources).filter(function(e){ return e[1] > 0; }).sort(function(a,b){ return b[1]-a[1]; });
+    const zero    = Object.entries(sources).filter(function(e){ return e[1] === 0; }).sort(function(a,b){ return a[0].localeCompare(b[0]); });
+    allChannelsSorted = nonZero.concat(zero);
     channelsPage = 1;
     _renderChannelsPage();
 }
 
 function _renderChannelsPage() {
     const container = document.getElementById('channels-container');
-    if (!container || !allChannelsSorted.length) return;
+    if (!container) return;
+    if (!allChannelsSorted.length) {
+        container.innerHTML = '<div style="padding:24px;text-align:center;color:var(--text-secondary);font-size:0.8125rem;">Нет данных за выбранный период</div>';
+        return;
+    }
 
-    const maxCount = allChannelsSorted[0][1];
+    const maxCount = Math.max(allChannelsSorted[0][1], 1); // avoid div/0 when all are 0
     const totalPgs = Math.ceil(allChannelsSorted.length / channelsPerPage);
     const start    = (channelsPage - 1) * channelsPerPage;
     const page     = allChannelsSorted.slice(start, start + channelsPerPage);
@@ -986,7 +1039,7 @@ function updateDateRangeDisplay(period) {
     if (!el) return;
     const today = new Date();
     if (period === 'day') {
-        el.textContent = fmtDate(today);
+        el.textContent = 'Сегодня, ' + fmtDate(today);
     } else if (period === 'week') {
         const f = new Date(today); f.setDate(today.getDate() - 7);
         el.textContent = fmtDate(f) + ' — ' + fmtDate(today);
