@@ -13,6 +13,8 @@ let funnelCategory = 'all';
 let sourcesPeriod  = 'day';
 let mgrPeriod      = 'day';
 let chnPeriod      = 'day';
+let chnMetric      = 'leads'; // 'leads' | 'conversion'
+let allChannelsWon = {};       // name → won deals count (from /api/channels)
 let pageMgrPeriod  = 'day';
 let pageLeadsPeriod = 'day';
 let pageLeadsStatus = 'all';
@@ -103,6 +105,7 @@ document.addEventListener('DOMContentLoaded', function() {
     initFunnelSelect();
     initSourcesControls();
     initManagersSort();
+    initChannelsMetric();
     initRefreshButton();
     initTabs();
     initHelpTooltips();
@@ -596,7 +599,8 @@ async function fetchChannels(period) {
         const d   = await res.json();
         if (d.sources) {
             window._channelSources = d.sources;
-            renderChannels(d.sources);
+            allChannelsWon = d.wonBySource || {};
+            renderChannels(d.sources, d.wonBySource || {});
         }
     } catch(e) { console.error('fetchChannels', e); }
 }
@@ -604,12 +608,24 @@ async function fetchChannels(period) {
 const CHN_ICON = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><line x1="2" y1="12" x2="22" y2="12"/><path d="M12 2a15.3 15.3 0 0 1 4 10 15.3 15.3 0 0 1-4 10 15.3 15.3 0 0 1-4-10 15.3 15.3 0 0 1 4-10z"/></svg>';
 const CHN_COLORS = ['#2fc6f6','#ffa900','#9dcf00','#ff5752','#ab7fe6','#ec4899','#14b8a6','#6366f1'];
 
-function renderChannels(sources) {
-    // Sort: non-zero first (by count desc), then zero entries alphabetically
-    const nonZero = Object.entries(sources).filter(function(e){ return e[1] > 0; }).sort(function(a,b){ return b[1]-a[1]; });
-    const zero    = Object.entries(sources).filter(function(e){ return e[1] === 0; }).sort(function(a,b){ return a[0].localeCompare(b[0]); });
+function renderChannels(sources, wonBySource) {
+    wonBySource = wonBySource || {};
+    // allChannelsSorted: [name, totalCount, wonCount]
+    const entries = Object.entries(sources).map(function(e) {
+        return [e[0], e[1], wonBySource[e[0]] || 0];
+    });
+    const nonZero = entries.filter(function(e){ return e[1] > 0; }).sort(function(a,b){ return b[1]-a[1]; });
+    const zero    = entries.filter(function(e){ return e[1] === 0; }).sort(function(a,b){ return a[0].localeCompare(b[0]); });
     allChannelsSorted = nonZero.concat(zero);
     channelsPage = 1;
+    _renderChannelsPage();
+}
+
+function setChnMetric(metric) {
+    chnMetric = metric;
+    // Sync dropdown if exists
+    var sel = document.getElementById('channels-metric-select');
+    if (sel) sel.value = metric;
     _renderChannelsPage();
 }
 
@@ -621,24 +637,50 @@ function _renderChannelsPage() {
         return;
     }
 
-    const maxCount = Math.max(allChannelsSorted[0][1], 1); // avoid div/0 when all are 0
+    const isConversion = chnMetric === 'conversion';
+
+    // For bar scaling:
+    // leads mode:      bar width relative to max total count
+    // conversion mode: bar width = conversion rate (won/total * 100), max is 100%
+    const maxLeads = Math.max(allChannelsSorted[0][1], 1);
+
     const totalPgs = Math.ceil(allChannelsSorted.length / channelsPerPage);
     const start    = (channelsPage - 1) * channelsPerPage;
     const page     = allChannelsSorted.slice(start, start + channelsPerPage);
 
     container.innerHTML = page.map(function(entry, i) {
         const gi    = start + i;
-        const name  = entry[0], count = entry[1];
+        const name  = entry[0];
+        const total = entry[1];
+        const won   = entry[2];
         const color = CHN_COLORS[gi % CHN_COLORS.length];
-        const barW  = ((count / maxCount) * 100).toFixed(0);
+
+        var barW, valueLabel, subLabel;
+
+        if (isConversion) {
+            // Bar = conversion % of this source, scaled to 100
+            const conv = total > 0 ? won / total * 100 : 0;
+            barW       = conv.toFixed(0);
+            valueLabel = conv.toFixed(1) + '%';
+            // Sub-label: "X лидов → Y сделок"
+            subLabel   = total + ' лидов → ' + won + ' сделок';
+        } else {
+            barW       = ((total / maxLeads) * 100).toFixed(0);
+            valueLabel = String(total);
+            subLabel   = total + ' лидов';
+        }
+
         return '<div class="channel-row">' +
             '<div class="channel-info">' +
             '<div class="channel-icon" style="background:' + color + '20;color:' + color + ';">' + CHN_ICON + '</div>' +
-            '<div class="channel-name"><span>' + name + '</span><span class="channel-leads">' + count + ' лидов</span></div>' +
+            '<div class="channel-name">' +
+            '<span>' + name + '</span>' +
+            '<span class="channel-leads">' + subLabel + '</span>' +
+            '</div>' +
             '</div>' +
             '<div class="channel-bar-container">' +
-            '<div class="channel-bar" style="width:' + barW + '%;background:' + color + ';"></div>' +
-            '<span class="channel-value">' + count + '</span>' +
+            '<div class="channel-bar" style="width:' + barW + '%;background:' + color + ';min-width:' + (barW > 0 ? '4' : '0') + 'px;"></div>' +
+            '<span class="channel-value">' + valueLabel + '</span>' +
             '</div>' +
             '</div>';
     }).join('');
@@ -728,6 +770,14 @@ function initNavButtons() {
     document.querySelectorAll('.chn-period-btn').forEach(function(btn) {
         btn.addEventListener('click', function() { fetchChannels(btn.dataset.period); });
     });
+}
+
+function initChannelsMetric() {
+    var sel = document.getElementById('channels-metric-select');
+    if (sel && !sel.dataset.init) {
+        sel.addEventListener('change', function() { setChnMetric(sel.value); });
+        sel.dataset.init = '1';
+    }
 }
 
 function initManagersSort() {

@@ -446,19 +446,30 @@ app.get('/api/managers', async (req, res) => {
     }
 });
 
-// ── Endpoint 6: Channels (same logic as Sources) ─────────────
-// Always returns ALL known sources, even with 0 count.
+// ── Endpoint 6: Channels ─────────────────────────────────────
+// Returns sources (total deals per source) + wonBySource (won deals per source).
+// Always includes ALL known source types, even with 0.
 app.get('/api/channels', async (req, res) => {
     try {
         const client = getClient(req);
         const { period = 'day' } = req.query;
         const { from, to } = parsePeriod(period);
 
-        const [deals, sourceStatuses] = await Promise.all([
+        const successStageIds = await getSuccessStageIds(client);
+
+        const [deals, wonDeals, sourceStatuses] = await Promise.all([
+            // All deals in period — total count per source
             getAll(client, 'crm.deal.list', {
                 filter: { '>=DATE_CREATE': from, '<=DATE_CREATE': to },
                 select: ['ID', 'SOURCE_ID']
             }),
+            // Won deals in period — used for conversion per source
+            successStageIds.length > 0
+                ? getAll(client, 'crm.deal.list', {
+                    filter: { STAGE_ID: successStageIds, '>=DATE_CREATE': from, '<=DATE_CREATE': to },
+                    select: ['ID', 'SOURCE_ID']
+                  })
+                : Promise.resolve({ result: [] }),
             client.call('crm.status.list', { filter: { ENTITY_ID: 'SOURCE' } })
         ]);
 
@@ -468,16 +479,28 @@ app.get('/api/channels', async (req, res) => {
         }
 
         // Pre-populate ALL known sources with 0
-        const sources = {};
-        Object.values(sourceNames).forEach(name => { sources[name] = 0; });
+        const sources    = {};
+        const wonBySource = {};
+        Object.values(sourceNames).forEach(name => { sources[name] = 0; wonBySource[name] = 0; });
 
         deals.result.forEach(deal => {
             const key  = deal.SOURCE_ID || 'OTHER';
             const name = sourceNames[key] || key;
-            sources[name] = (sources[name] || 0) + 1;
+            sources[name]    = (sources[name]    || 0) + 1;
+            wonBySource[name] = wonBySource[name] || 0;
         });
 
-        res.json({ sources, total: deals.total });
+        wonDeals.result.forEach(deal => {
+            const key  = deal.SOURCE_ID || 'OTHER';
+            const name = sourceNames[key] || key;
+            wonBySource[name] = (wonBySource[name] || 0) + 1;
+        });
+
+        const totalDeals = deals.result.length;
+        const totalWon   = wonDeals.result.length;
+        const conversionRate = totalDeals > 0 ? parseFloat((totalWon / totalDeals * 100).toFixed(1)) : 0;
+
+        res.json({ sources, wonBySource, total: totalDeals, totalWon, conversionRate });
     } catch (e) {
         console.error('[Channels Error]', e.message);
         res.status(500).json({ error: e.message });
