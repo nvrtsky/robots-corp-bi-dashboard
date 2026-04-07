@@ -16,12 +16,12 @@ app.use(express.static(__dirname));
 const SUCCESS_STAGES = [
     "Заявки на рассылку", "Квалифицирован", "NPS собран",
     "Экскурсия проведена", "День рождения проведен",
-    "Отправили информацию", "Назначен просмотр",
+    "Отправили информацию", "Назначен просмотр"
 ];
 const FAIL_STAGES = [
     "Выбрали что-то другое", "Не подошли условия",
     "Не отвечает более 3х раз", "Запрос в техподдержку закрыт", "Спам",
-    "Потребность исчезла",
+    "Потребность исчезла"
 ];
 
 // ── Shared helpers ─────────────────────────────────────────────
@@ -76,8 +76,7 @@ async function getSuccessStageIds(client) {
 function parsePeriod(period) {
     const today = new Date();
     const todayStr = today.toISOString().split('T')[0];
-    const todayEnd = todayStr + 'T23:59:59';  // <-- добавить конец дня
-
+    const todayEnd = todayStr + 'T23:59:59';
     if (period === 'day') {
         return { from: todayStr, to: todayEnd };
     }
@@ -86,7 +85,7 @@ function parsePeriod(period) {
     else from.setMonth(today.getMonth() - 1);
     return {
         from: from.toISOString().split('T')[0],
-        to:   todayEnd   // <-- тоже исправить для недели/месяца
+        to:   todayEnd
     };
 }
 
@@ -284,6 +283,10 @@ app.get('/api/funnel', async (req, res) => {
         const catFilter   = categoryId && categoryId !== 'all' ? { CATEGORY_ID: categoryId } : {};
         const stageListId = categoryId && categoryId !== 'all' ? parseInt(categoryId) : 0;
 
+        const specificCategory = catFilter.CATEGORY_ID;
+
+        // Fetch deals WITH date filter so funnel reflects the selected period.
+        // Also fetch stages for selected funnel only (or all if 'all' mode).
         const [allDeals, stages, categories] = await Promise.all([
             getAll(client, 'crm.deal.list', {
                 filter: { '>=DATE_CREATE': from, '<=DATE_CREATE': to, ...catFilter },
@@ -293,9 +296,13 @@ app.get('/api/funnel', async (req, res) => {
             client.call('crm.dealcategory.list')
         ]);
 
+        // Build stageMap ONLY for the selected funnel when specific category chosen.
+        // In "all" mode load all funnels — but same-named stages (e.g. "Новая заявка"
+        // from 15 funnels) will still merge; that is expected for the overview.
         const stageMap = {};
         if (stages.result) stages.result.forEach(s => { stageMap[s.STATUS_ID] = s.NAME; });
-        if (categories.result) {
+
+        if (!specificCategory && categories.result) {
             for (const cat of categories.result) {
                 try {
                     const cs = await client.call('crm.dealcategory.stage.list', { id: cat.ID });
@@ -303,13 +310,17 @@ app.get('/api/funnel', async (req, res) => {
                 } catch (e) {}
             }
         }
+        // When specific funnel is selected: stageMap already contains ONLY that
+        // funnel's stages from the crm.dealcategory.stage.list call above.
 
-        // Pre-populate ALL stages with 0 so empty stages still appear
-        // Preserve pipeline order from stageMap (insertion order = Bitrix sort order)
+        // Pre-populate with 0 (insertion order = Bitrix pipeline order).
         const funnelData = {};
         Object.values(stageMap).forEach(name => { funnelData[name] = 0; });
+
         allDeals.result.forEach(deal => {
-            const name = stageMap[deal.STAGE_ID] || deal.STAGE_ID;
+            // Skip deals whose STAGE_ID is not in stageMap for this funnel
+            if (!stageMap[deal.STAGE_ID]) return;
+            const name = stageMap[deal.STAGE_ID];
             funnelData[name] = (funnelData[name] || 0) + 1;
         });
 

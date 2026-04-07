@@ -708,11 +708,26 @@ async function loadFunnels() {
             const sel = document.getElementById('funnel-select');
             if (sel) {
                 sel.innerHTML = '';
+
+                // Add "Все воронки" first so user can switch back
+                const allOpt = document.createElement('option');
+                allOpt.value = 'all';
+                allOpt.textContent = 'Все воронки';
+                sel.appendChild(allOpt);
+
                 d.funnels.filter(function(f) { return f.NAME !== 'Общая'; }).forEach(function(f) {
                     const o = document.createElement('option');
                     o.value = f.ID; o.textContent = f.NAME;
                     sel.appendChild(o);
                 });
+
+                // Auto-select first specific funnel and fetch its data
+                const specific = d.funnels.filter(function(f) { return f.NAME !== 'Общая'; });
+                if (specific.length > 0) {
+                    sel.value = specific[0].ID;
+                    funnelCategory = specific[0].ID;
+                    fetchFunnel(funnelPeriod, specific[0].ID);
+                }
             }
         }
     } catch(e) {}
