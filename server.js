@@ -15,12 +15,13 @@ app.use(express.static(__dirname));
 // ── Stage constants ────────────────────────────────────────────
 const SUCCESS_STAGES = [
     "Заявки на рассылку", "Квалифицирован", "NPS собран",
-    "Экскурсия проведена", "День рождения проведен"
+    "Экскурсия проведена", "День рождения проведен",
+    "Отправили информацию", "Назначен просмотр",
 ];
 const FAIL_STAGES = [
     "Выбрали что-то другое", "Не подошли условия",
     "Не отвечает более 3х раз", "Запрос в техподдержку закрыт", "Спам",
-    "Потребность исчезла"
+    "Потребность исчезла",
 ];
 
 // ── Shared helpers ─────────────────────────────────────────────
@@ -75,15 +76,17 @@ async function getSuccessStageIds(client) {
 function parsePeriod(period) {
     const today = new Date();
     const todayStr = today.toISOString().split('T')[0];
+    const todayEnd = todayStr + 'T23:59:59';  // <-- добавить конец дня
+
     if (period === 'day') {
-        return { from: todayStr, to: todayStr };
+        return { from: todayStr, to: todayEnd };
     }
     const from = new Date();
     if (period === 'week') from.setDate(today.getDate() - 7);
     else from.setMonth(today.getMonth() - 1);
     return {
         from: from.toISOString().split('T')[0],
-        to:   todayStr
+        to:   todayEnd   // <-- тоже исправить для недели/месяца
     };
 }
 
