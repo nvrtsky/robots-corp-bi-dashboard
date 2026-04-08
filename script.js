@@ -5,7 +5,7 @@
 let bitrixDomain = null;
 let isInBitrix   = false;
 let currentManagers    = [];
-let currentManagerSort = 'revenue';
+let currentManagerSort = 'conversion';
 
 let kpiPeriod      = 'day';
 let funnelPeriod   = 'day';
@@ -119,9 +119,9 @@ document.addEventListener('DOMContentLoaded', function() {
 });
 
 function initAll() {
-    loadFunnels();
+    loadFunnels();       // loadFunnels() calls fetchFunnel() after auto-selecting first funnel
     fetchKPI(kpiPeriod);
-    fetchFunnel(funnelPeriod, funnelCategory);
+    // fetchFunnel is NOT called here — loadFunnels() handles it to avoid race condition
     fetchSources(sourcesPeriod);
     fetchManagers(mgrPeriod);
     fetchChannels(chnPeriod);
@@ -292,10 +292,32 @@ function renderDealsTable() {
     const start = (currentDealPage - 1) * dealsPerPage;
     const page  = filtered.slice(start, start + dealsPerPage);
 
+    // Always render exactly dealsPerPage rows — pad with invisible empty rows.
+    // This keeps table height constant so pagination buttons never jump.
+    var _tbl = tbody.closest('table');
+    if (_tbl) {
+        _tbl.style.tableLayout = 'fixed';
+        // Set fixed column widths once so columns never reflow between pages
+        if (!_tbl.querySelector('colgroup')) {
+            var cg = document.createElement('colgroup');
+            // Сделка | Клиент | Менеджер | Этап | Сумма | В работе
+            [28, 16, 14, 16, 14, 12].forEach(function(pct) {
+                var col = document.createElement('col');
+                col.style.width = pct + '%';
+                cg.appendChild(col);
+            });
+            _tbl.insertBefore(cg, _tbl.firstChild);
+        }
+    }
+
+    var EMPTY_ROW = '<tr style="height:49px;visibility:hidden;"><td colspan="6"></td></tr>';
+
     if (page.length === 0) {
-        tbody.innerHTML = '<tr><td colspan="6" style="text-align:center;padding:40px;">Нет сделок в процессе</td></tr>';
+        var emptyMsg = '<tr><td colspan="6" style="text-align:center;padding:16px;color:var(--text-secondary);">Нет сделок в процессе</td></tr>';
+        var padZero = Array(dealsPerPage - 1).fill(EMPTY_ROW).join('');
+        tbody.innerHTML = emptyMsg + padZero;
     } else {
-        tbody.innerHTML = page.map(function(deal) {
+        var dealRows = page.map(function(deal) {
             const days = deal.daysInProgress;
             const dc   = days > 30 ? 'critical' : days > 14 ? 'warning' : days < 7 ? 'fresh' : 'normal';
             const mgr  = currentManagers.find(function(m) { return String(m.id) === String(deal.ASSIGNED_BY_ID); });
@@ -305,20 +327,22 @@ function renderDealsTable() {
             const mgrInit = mgr
                 ? mgr.name.split(' ').map(function(n) { return n[0]; }).join('').slice(0,2)
                 : (deal.ASSIGNED_BY_ID || '?');
-            return '<tr style="cursor:pointer;" onclick="window.open(\'https://robotcorporation.bitrix24.ru/crm/deal/details/' + deal.ID + '/\',\'_blank\')">' +
-                '<td class="deal-name"><span class="deal-id">#' + deal.ID + '</span>' + escapeHtml(deal.TITLE) + '</td>' +
-                '<td style="font-size:0.8125rem;color:var(--text-secondary);">' + escapeHtml(deal.stageName || deal.STAGE_ID) + '</td>' +
-                '<td><div style="display:flex;align-items:center;gap:6px;">' +
-                '<div class="cell-avatar" style="' + mgrPhoto + '">' + (mgrPhoto ? '' : mgrInit) + '</div>' +
-                '<span>' + escapeHtml(mgrName) + '</span></div></td>' +
-                '<td><span class="stage-badge">' + escapeHtml(deal.stageName || deal.STAGE_ID) + '</span></td>' +
-                '<td class="deal-amount">' + fmtMoney(deal.OPPORTUNITY) + '</td>' +
-                '<td><span class="duration ' + dc + '">' + days + ' дн.</span></td>' +
+            return '<tr style="cursor:pointer;height:49px;" onclick="window.open(\'https://robotcorporation.bitrix24.ru/crm/deal/details/' + deal.ID + '/\',\'_blank\')">' +
+                '<td class="deal-name" style="overflow:hidden;max-width:0;white-space:nowrap;"><span class="deal-id" style="display:block;overflow:hidden;text-overflow:ellipsis;">#' + deal.ID + '</span><span style="overflow:hidden;text-overflow:ellipsis;display:block;">' + escapeHtml(deal.TITLE) + '</span></td>' +
+                '<td style="font-size:0.8125rem;color:var(--text-secondary);overflow:hidden;white-space:nowrap;text-overflow:ellipsis;max-width:0;">' + escapeHtml(deal.clientName || '—') + '</td>' +
+                '<td style="overflow:hidden;white-space:nowrap;max-width:0;"><div style="display:flex;align-items:center;gap:6px;">' +
+                '<div class="cell-avatar" style="flex-shrink:0;' + mgrPhoto + '">' + (mgrPhoto ? '' : mgrInit) + '</div>' +
+                '<span style="overflow:hidden;text-overflow:ellipsis;">' + escapeHtml(mgrName) + '</span></div></td>' +
+                '<td style="overflow:hidden;max-width:0;"><span class="stage-badge" style="white-space:nowrap;">' + escapeHtml(deal.stageName || deal.STAGE_ID) + '</span></td>' +
+                '<td class="deal-amount" style="white-space:nowrap;">' + fmtMoney(deal.OPPORTUNITY) + '</td>' +
+                '<td style="white-space:nowrap;"><span class="duration ' + dc + '">' + days + ' дн.</span></td>' +
                 '</tr>';
         }).join('');
+        var padRows = Array(Math.max(0, dealsPerPage - page.length)).fill(EMPTY_ROW).join('');
+        tbody.innerHTML = dealRows + padRows;
     }
 
-    let pg = document.querySelector('.deals-pagination');
+        let pg = document.querySelector('.deals-pagination');
     if (!pg) {
         pg = document.createElement('div');
         pg.className = 'deals-pagination';
@@ -517,30 +541,45 @@ function changeSourcesPage(dir) {
 }
 
 // ── 5. Managers ────────────────────────────────────────────────
+// AbortController to cancel in-flight requests when period changes quickly
+var _mgrAbortCtrl = null;
+
 async function fetchManagers(period) {
+    // Cancel previous in-flight request — prevents old slow Month response
+    // from overwriting a newer Day response (race condition fix)
+    if (_mgrAbortCtrl) { _mgrAbortCtrl.abort(); }
+    _mgrAbortCtrl = new AbortController();
+    const signal = _mgrAbortCtrl.signal;
+
     mgrPeriod = period;
     setBtnActive('.mgr-period-btn', period);
+
+    // Reset immediately so stale data from previous period never shows
+    currentManagers = [];
+
     const container = document.querySelector('.managers-card .managers-list');
-    if (container) container.innerHTML = '<div style="padding:24px;text-align:center;color:var(--text-secondary);">Загрузка...</div>';
+    if (container) container.innerHTML = '<div style="display:flex;align-items:center;justify-content:center;height:220px;"><div style="width:36px;height:36px;border-radius:50%;border:3px solid var(--border-color);border-top-color:var(--accent-primary);animation:mgr-spin 0.8s linear infinite;"></div></div><style>@keyframes mgr-spin{to{transform:rotate(360deg)}}</style>';
     try {
-        const res = await fetch(buildUrl('/api/managers', { period: period }));
+        const res = await fetch(buildUrl('/api/managers', { period: period }), { signal });
         const d   = await res.json();
-        if (d.managers && d.managers.length > 0) {
-            currentManagers = d.managers;
-        }
-        // Always render — even if managers list is empty for today,
-        // currentManagers retains the 30-day roster from the server response.
-        // The server now always returns the full roster, so d.managers is never empty.
+        if (d.managers) currentManagers = d.managers;
         dashMgrPage = 1;
         renderManagersWidget(sortMgr(currentManagers, currentManagerSort));
-        renderDealsTable(); // refresh avatars with up-to-date manager data
-    } catch(e) { console.error('fetchManagers', e); }
+        if (dealsInProgressData.deals.length > 0) renderDealsTable();
+    } catch(e) {
+        if (e.name === 'AbortError') return;
+        console.error('fetchManagers', e);
+    }
 }
 
 function renderManagersWidget(managers) {
     const container = document.querySelector('.managers-card .managers-list');
     if (!container) return;
-    const maxRev   = Math.max.apply(null, managers.map(function(m) { return m.revenue; }).concat([1]));
+    const by = currentManagerSort;
+
+    const maxRev   = Math.max.apply(null, managers.map(function(m) { return m.revenue;    }).concat([1]));
+    const maxTotal = Math.max.apply(null, managers.map(function(m) { return m.total || 0; }).concat([1]));
+
     const medals   = ['gold','silver','bronze'];
     const totalPgs = Math.ceil(managers.length / dashMgrPerPage);
     const start    = (dashMgrPage - 1) * dashMgrPerPage;
@@ -548,19 +587,35 @@ function renderManagersWidget(managers) {
 
     container.innerHTML = page.map(function(m, i) {
         const gi  = start + i;
-        const pct = m.revenue / maxRev * 100;
         const rc  = medals[gi] || '';
         const ini = m.name.split(' ').map(function(n) { return n[0]; }).join('').slice(0,2);
         const photoStyle = m.photo ? 'style="background-image:url(\'' + m.photo + '\');background-size:cover;background-position:center;"' : '';
+
+        var barPct, subtitle, rightVal;
+
+        if (by === 'conversion') {
+            barPct   = m.conversionRate || 0;
+            subtitle = (m.converted || 0) + ' конвертированных';
+            rightVal = (m.converted || 0) + ' конв.';
+        } else if (by === 'deals') {
+            barPct   = maxTotal > 0 ? Math.round((m.total || 0) / maxTotal * 100) : 0;
+            subtitle = (m.total || 0) + ' лидов';
+            rightVal = (m.total || 0) + ' сд.';
+        } else {
+            barPct   = maxRev > 0 ? Math.round(m.revenue / maxRev * 100) : 0;
+            subtitle = (m.deals || 0) + ' успешных';
+            rightVal = fmtMoney(m.revenue);
+        }
+
         return '<div class="manager-item" style="cursor:pointer;" onclick="window.open(\'https://robotcorporation.bitrix24.ru/company/personal/user/' + m.id + '/\',\'_blank\')">' +
             '<div class="manager-rank ' + rc + '">' + (gi+1) + '</div>' +
             '<div class="manager-avatar" ' + photoStyle + '>' + (m.photo ? '' : ini) + '</div>' +
             '<div class="manager-info">' +
             '<span class="manager-name">' + m.name + '</span>' +
-            '<span class="manager-deals">' + m.deals + ' сделок</span>' +
+            '<span class="manager-deals">' + subtitle + '</span>' +
             '</div>' +
-            '<div class="manager-stats"><div class="manager-bar"><div class="bar-fill" style="width:' + pct + '%"></div></div></div>' +
-            '<div class="manager-revenue">' + fmtMoney(m.revenue) + '</div>' +
+            '<div class="manager-stats"><div class="manager-bar"><div class="bar-fill" style="width:' + barPct + '%"></div></div></div>' +
+            '<div class="manager-revenue">' + rightVal + '</div>' +
             '</div>';
     }).join('');
 
@@ -577,9 +632,9 @@ function changeDashMgrPage(dir) {
 
 function sortMgr(managers, by) {
     return managers.slice().sort(function(a,b) {
-        if (by === 'revenue') return b.revenue - a.revenue;
-        if (by === 'deals')   return b.deals - a.deals;
-        return (b.revenue / (b.deals||1)) - (a.revenue / (a.deals||1));
+        if (by === 'revenue')  return b.revenue - a.revenue;
+        if (by === 'deals')    return (b.total || 0) - (a.total || 0);   // все сделки включая Новые
+        return (b.converted || 0) - (a.converted || 0);                  // сортировка по числу конвертированных
     });
 }
 
@@ -800,7 +855,7 @@ function initManagersSort() {
     if (!sel) return;
     sel.addEventListener('change', function(e) {
         const m = {'По выручке':'revenue','По сделкам':'deals','По конверсии':'conversion'};
-        currentManagerSort = m[e.target.value] || 'revenue';
+        currentManagerSort = m[e.target.value] || 'conversion';
         if (currentManagers.length) { dashMgrPage = 1; renderManagersWidget(sortMgr(currentManagers, currentManagerSort)); }
     });
 }

@@ -16,12 +16,14 @@ app.use(express.static(__dirname));
 const SUCCESS_STAGES = [
     "Заявки на рассылку", "Квалифицирован", "NPS собран",
     "Экскурсия проведена", "День рождения проведен",
-    "Отправили информацию", "Назначен просмотр"
 ];
+
 const FAIL_STAGES = [
     "Выбрали что-то другое", "Не подошли условия",
     "Не отвечает более 3х раз", "Запрос в техподдержку закрыт", "Спам",
-    "Потребность исчезла"
+    "Потребность исчезла",
+    "СПАМ", "Не отвечает более 3х суток", "Отложили",
+    "Дорого"
 ];
 
 // ── Shared helpers ─────────────────────────────────────────────
@@ -221,7 +223,8 @@ app.get('/api/deals/in-progress', async (req, res) => {
 
         const allDeals = await getAll(client, 'crm.deal.list', {
             filter: { '>=DATE_CREATE': monthAgo.toISOString().split('T')[0] },
-            select: ['ID', 'TITLE', 'OPPORTUNITY', 'ASSIGNED_BY_ID', 'DATE_CREATE', 'STAGE_ID', 'CATEGORY_ID', 'SEMANTIC']
+            select: ['ID', 'TITLE', 'OPPORTUNITY', 'ASSIGNED_BY_ID', 'DATE_CREATE',
+                     'STAGE_ID', 'CATEGORY_ID', 'SEMANTIC', 'CONTACT_ID', 'COMPANY_ID']
         });
 
         const now = new Date();
@@ -253,6 +256,8 @@ app.get('/api/deals/in-progress', async (req, res) => {
                 TITLE: deal.TITLE || 'Без названия',
                 OPPORTUNITY: parseFloat(deal.OPPORTUNITY) || 0,
                 ASSIGNED_BY_ID: deal.ASSIGNED_BY_ID,
+                CONTACT_ID: deal.CONTACT_ID || null,
+                COMPANY_ID: deal.COMPANY_ID || null,
                 DATE_CREATE: deal.DATE_CREATE,
                 STAGE_ID: deal.STAGE_ID,
                 stageName,
@@ -260,6 +265,32 @@ app.get('/api/deals/in-progress', async (req, res) => {
                 durationCategory: cat
             });
         }
+
+        // Batch-load contact names for deals that have a CONTACT_ID
+        const contactIds = [...new Set(
+            dealsInProgress.map(d => d.CONTACT_ID).filter(Boolean)
+        )];
+        const contactMap = {};
+        if (contactIds.length > 0) {
+            try {
+                const contacts = await getAll(client, 'crm.contact.list', {
+                    filter: { ID: contactIds },
+                    select: ['ID', 'NAME', 'LAST_NAME']
+                });
+                contacts.result.forEach(c => {
+                    contactMap[String(c.ID)] = [c.NAME, c.LAST_NAME].filter(Boolean).join(' ').trim();
+                });
+            } catch(e) { /* non-critical */ }
+        }
+
+        // Attach clientName to each deal
+        dealsInProgress.forEach(d => {
+            if (d.CONTACT_ID && contactMap[String(d.CONTACT_ID)]) {
+                d.clientName = contactMap[String(d.CONTACT_ID)];
+            } else {
+                d.clientName = '';
+            }
+        });
 
         res.json({
             deals: dealsInProgress,
@@ -389,15 +420,26 @@ app.get('/api/managers', async (req, res) => {
         const rosterFromStr = rosterFrom.toISOString().split('T')[0];
         const todayStr      = new Date().toISOString().split('T')[0];
 
-        const successStageIds = await getSuccessStageIds(client);
+        const [stageMap, successStageIds] = await Promise.all([
+            buildStageMap(client),
+            getSuccessStageIds(client)
+        ]);
 
-        const [rosterDeals, successDeals] = await Promise.all([
-            // Roster: all deals from last 30 days → gives us the full set of manager IDs
+        // "Новая заявка" stage names across all funnels
+        const NEW_STAGE_NAMES = new Set(['Новая заявка', 'Новая']);
+
+        const [rosterDeals, allPeriodDeals, successDeals] = await Promise.all([
+            // Roster: all deals from last 30 days → full set of manager IDs
             getAll(client, 'crm.deal.list', {
                 filter: { '>=DATE_CREATE': rosterFromStr, '<=DATE_CREATE': todayStr, ...catFilter },
                 select: ['ID', 'ASSIGNED_BY_ID']
             }),
-            // Stats: success deals in the SELECTED period only
+            // All deals in SELECTED period — for conversion rate calculation
+            getAll(client, 'crm.deal.list', {
+                filter: { '>=DATE_CREATE': from, '<=DATE_CREATE': to, ...catFilter },
+                select: ['ID', 'ASSIGNED_BY_ID', 'STAGE_ID', 'SEMANTIC']
+            }),
+            // Success deals in period — for revenue
             successStageIds.length > 0
                 ? getAll(client, 'crm.deal.list', {
                     filter: { STAGE_ID: successStageIds, '>=DATE_CREATE': from, '<=DATE_CREATE': to, ...catFilter },
@@ -406,16 +448,30 @@ app.get('/api/managers', async (req, res) => {
                 : Promise.resolve({ result: [] })
         ]);
 
-        // Revenue/count stats for selected period
+        // Per-manager stats for selected period
         const managerStats = {};
+
+        // Count total and converted deals per manager
+        // Converted = not in FAIL_STAGES and not "Новая заявка"
+        allPeriodDeals.result.forEach(deal => {
+            const id = String(deal.ASSIGNED_BY_ID || 'unknown');
+            if (!managerStats[id]) managerStats[id] = { total: 0, converted: 0, count: 0, revenue: 0 };
+            const stageName = stageMap[deal.STAGE_ID] || deal.STAGE_ID;
+            const isFail = FAIL_STAGES.includes(stageName) || deal.SEMANTIC === 'F';
+            const isNew  = NEW_STAGE_NAMES.has(stageName);
+            managerStats[id].total++;
+            if (!isFail && !isNew) managerStats[id].converted++;
+        });
+
+        // Revenue from success deals
         successDeals.result.forEach(deal => {
             const id = String(deal.ASSIGNED_BY_ID || 'unknown');
-            if (!managerStats[id]) managerStats[id] = { count: 0, revenue: 0 };
+            if (!managerStats[id]) managerStats[id] = { total: 0, converted: 0, count: 0, revenue: 0 };
             managerStats[id].count++;
             managerStats[id].revenue += parseFloat(deal.OPPORTUNITY || 0);
         });
 
-        // Build full ID set from 30-day roster (guarantees managers always appear)
+        // Build full ID set from 30-day roster
         const allIds = new Set();
         rosterDeals.result.forEach(d => { if (d.ASSIGNED_BY_ID) allIds.add(String(d.ASSIGNED_BY_ID)); });
         Object.keys(managerStats).forEach(id => allIds.add(id));
@@ -431,16 +487,21 @@ app.get('/api/managers', async (req, res) => {
                 });
                 managers = managerIds.map(id => {
                     const user  = usersRes.result.find(u => String(u.ID) === id);
-                    const stats = managerStats[id] || { count: 0, revenue: 0 };
+                    const stats = managerStats[id] || { total: 0, converted: 0, count: 0, revenue: 0 };
+                    const convRate = stats.total > 0
+                        ? parseFloat((stats.converted / stats.total * 100).toFixed(1))
+                        : 0;
                     return {
                         id,
-                        name:   user ? `${user.NAME} ${user.LAST_NAME}`.trim() : `Менеджер ${id}`,
-                        photo:  user ? (user.PERSONAL_PHOTO || null) : null,
-                        deals:  stats.count,
-                        revenue: stats.revenue
+                        name:           user ? `${user.NAME} ${user.LAST_NAME}`.trim() : `Менеджер ${id}`,
+                        photo:          user ? (user.PERSONAL_PHOTO || null) : null,
+                        deals:          stats.count,
+                        revenue:        stats.revenue,
+                        total:          stats.total,
+                        converted:      stats.converted,
+                        conversionRate: convRate
                     };
                 }).sort((a, b) => {
-                    // Non-zero revenue first (desc), then zero entries alphabetically
                     if (b.revenue !== a.revenue) return b.revenue - a.revenue;
                     return a.name.localeCompare(b.name, 'ru');
                 });
@@ -448,7 +509,10 @@ app.get('/api/managers', async (req, res) => {
                 managers = managerIds.map(id => ({
                     id, name: `Менеджер ${id}`, photo: null,
                     deals: managerStats[id]?.count || 0,
-                    revenue: managerStats[id]?.revenue || 0
+                    revenue: managerStats[id]?.revenue || 0,
+                    total: managerStats[id]?.total || 0,
+                    converted: managerStats[id]?.converted || 0,
+                    conversionRate: 0
                 }));
             }
         }
