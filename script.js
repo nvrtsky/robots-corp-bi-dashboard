@@ -7,6 +7,14 @@ let isInBitrix   = false;
 let currentManagers    = [];
 let currentManagerSort = 'conversion';
 
+// Custom date range state for KPI (top nav calendar)
+let customDateFrom = null;
+let customDateTo   = null;
+
+// Per-widget custom date ranges — each widget is independent
+var widgetCustomRanges = { funnel: null, sources: null, managers: null, channels: null };
+var _activePickerWidget = null; // which widget's popover is open
+
 let kpiPeriod      = 'day';
 let funnelPeriod   = 'day';
 let funnelCategory = 'all';
@@ -118,6 +126,235 @@ document.addEventListener('DOMContentLoaded', function() {
     initAll();
 });
 
+// ── Custom date range picker ──────────────────────────────────
+function toggleDatePicker() {
+    var pop = document.getElementById('date-picker-popover');
+    if (!pop) return;
+    var visible = pop.style.display !== 'none';
+    pop.style.display = visible ? 'none' : 'block';
+    if (!visible) {
+        // Pre-fill with current custom range if active
+        if (customDateFrom) document.getElementById('custom-date-from').value = customDateFrom;
+        if (customDateTo)   document.getElementById('custom-date-to').value   = customDateTo;
+    }
+}
+
+function applyCustomDateRange() {
+    var from = document.getElementById('custom-date-from').value;
+    var to   = document.getElementById('custom-date-to').value;
+    if (!from || !to) { alert('Выберите обе даты'); return; }
+    if (from > to) { alert('Дата начала должна быть раньше даты окончания'); return; }
+
+    customDateFrom = from;
+    customDateTo   = to;
+
+    // Deactivate preset period buttons
+    document.querySelectorAll('.main-kpi-btn').forEach(function(b) { b.classList.remove('active'); });
+
+    // Show selected range in header
+    var el = document.getElementById('date-range-text');
+    if (el) {
+        var fmt = function(s) { var d = new Date(s); return d.getDate() + ' ' + ['янв','фев','мар','апр','май','июн','июл','авг','сен','окт','ноя','дек'][d.getMonth()]; };
+        el.textContent = fmt(from) + ' — ' + fmt(to);
+    }
+
+    // Highlight calendar icon
+    var btn = document.getElementById('date-range-btn');
+    if (btn) btn.style.color = 'var(--accent-primary)';
+
+    document.getElementById('date-picker-popover').style.display = 'none';
+
+    // Reload all widgets with new range
+    showAllSkeletons();
+    Promise.all([
+        fetchKPI(kpiPeriod),
+        fetchFunnel(funnelPeriod, funnelCategory),
+        fetchSources(sourcesPeriod),
+        fetchManagers(mgrPeriod),
+        fetchChannels(chnPeriod),
+        fetchDealsInProgress()
+    ]);
+}
+
+function clearCustomDateRange() {
+    customDateFrom = null;
+    customDateTo   = null;
+
+    // Restore default period button
+    document.querySelectorAll('.main-kpi-btn').forEach(function(b) {
+        b.classList.toggle('active', b.dataset.period === kpiPeriod);
+    });
+    updateDateRangeDisplay(kpiPeriod);
+
+    // Remove calendar highlight
+    var btn = document.getElementById('date-range-btn');
+    if (btn) btn.style.color = '';
+
+    document.getElementById('date-picker-popover').style.display = 'none';
+    document.getElementById('custom-date-from').value = '';
+    document.getElementById('custom-date-to').value   = '';
+
+    showAllSkeletons();
+    Promise.all([
+        fetchKPI(kpiPeriod),
+        fetchFunnel(funnelPeriod, funnelCategory),
+        fetchSources(sourcesPeriod),
+        fetchManagers(mgrPeriod),
+        fetchChannels(chnPeriod),
+        fetchDealsInProgress()
+    ]);
+}
+
+// Close KPI popover when clicking outside
+document.addEventListener('click', function(e) {
+    var pop = document.getElementById('date-picker-popover');
+    var btn = document.getElementById('date-range-btn');
+    if (pop && btn && !pop.contains(e.target) && !btn.contains(e.target)) {
+        pop.style.display = 'none';
+    }
+    // Close widget popover when clicking outside
+    var wpop = document.getElementById('widget-date-popover');
+    if (wpop && wpop.style.display !== 'none') {
+        var calBtns = document.querySelectorAll('.widget-cal-btn');
+        var clickedCal = Array.from(calBtns).some(function(b) { return b.contains(e.target); });
+        if (!wpop.contains(e.target) && !clickedCal) {
+            wpop.style.display = 'none';
+            _activePickerWidget = null;
+        }
+    }
+});
+
+// ── Per-widget date picker ─────────────────────────────────────
+function openWidgetPicker(widget, anchorEl) {
+    var pop = document.getElementById('widget-date-popover');
+    if (!pop) return;
+
+    // Toggle: close if already open for this widget
+    if (_activePickerWidget === widget && pop.style.display !== 'none') {
+        pop.style.display = 'none';
+        _activePickerWidget = null;
+        return;
+    }
+
+    _activePickerWidget = widget;
+
+    // Pre-fill existing custom range
+    var range = widgetCustomRanges[widget];
+    document.getElementById('widget-date-from').value = range ? range.from : '';
+    document.getElementById('widget-date-to').value   = range ? range.to   : '';
+
+    // Position near the anchor button
+    var rect = anchorEl.getBoundingClientRect();
+    pop.style.top  = (rect.bottom + 6) + 'px';
+    pop.style.left = Math.max(8, rect.right - 260) + 'px';
+    pop.style.display = 'block';
+}
+
+function applyWidgetPicker() {
+    var widget = _activePickerWidget;
+    if (!widget) return;
+    var from = document.getElementById('widget-date-from').value;
+    var to   = document.getElementById('widget-date-to').value;
+    if (!from || !to) { alert('Выберите обе даты'); return; }
+    if (from > to)   { alert('Дата начала должна быть раньше даты окончания'); return; }
+
+    widgetCustomRanges[widget] = { from: from, to: to };
+
+    // Highlight the calendar button, deactivate preset buttons for this widget
+    var calBtn = document.getElementById('cal-btn-' + widget);
+    if (calBtn) calBtn.style.background = 'var(--accent-primary)', calBtn.style.color = 'white', calBtn.style.borderColor = 'var(--accent-primary)';
+
+    var periodBtnSel = { funnel: '.funnel-period-btn', sources: '.sources-period-btn', managers: '.mgr-period-btn', channels: '.chn-period-btn' }[widget];
+    if (periodBtnSel) document.querySelectorAll(periodBtnSel).forEach(function(b) { b.classList.remove('active'); });
+
+    document.getElementById('widget-date-popover').style.display = 'none';
+    _activePickerWidget = null;
+
+    // Reload only this widget
+    var r = widgetCustomRanges[widget];
+    if (widget === 'funnel')   fetchFunnelCustom(r.from, r.to);
+    if (widget === 'sources')  fetchSourcesCustom(r.from, r.to);
+    if (widget === 'managers') fetchManagersCustom(r.from, r.to);
+    if (widget === 'channels') fetchChannelsCustom(r.from, r.to);
+}
+
+function clearWidgetPicker() {
+    var widget = _activePickerWidget;
+    if (!widget) return;
+    widgetCustomRanges[widget] = null;
+
+    // Reset calendar button style
+    var calBtn = document.getElementById('cal-btn-' + widget);
+    if (calBtn) calBtn.style.background = '', calBtn.style.color = '', calBtn.style.borderColor = '';
+
+    // Restore first preset button as active
+    var periodBtnSel = { funnel: '.funnel-period-btn', sources: '.sources-period-btn', managers: '.mgr-period-btn', channels: '.chn-period-btn' }[widget];
+    if (periodBtnSel) {
+        var btns = document.querySelectorAll(periodBtnSel);
+        btns.forEach(function(b) { b.classList.remove('active'); });
+        if (btns[0]) btns[0].classList.add('active');
+    }
+
+    document.getElementById('widget-date-from').value = '';
+    document.getElementById('widget-date-to').value   = '';
+    document.getElementById('widget-date-popover').style.display = 'none';
+    _activePickerWidget = null;
+
+    // Reload with default period
+    if (widget === 'funnel')   fetchFunnel(funnelPeriod, funnelCategory);
+    if (widget === 'sources')  fetchSources(sourcesPeriod);
+    if (widget === 'managers') fetchManagers(mgrPeriod);
+    if (widget === 'channels') fetchChannels(chnPeriod);
+}
+
+// Custom-range fetch wrappers — pass from/to directly, don't touch period state
+async function fetchFunnelCustom(from, to) {
+    setBtnActive('.funnel-period-btn', '');
+    var params = { from: from, to: to };
+    if (funnelCategory && funnelCategory !== 'all') params.categoryId = funnelCategory;
+    try {
+        const res = await fetch(buildUrl('/api/funnel', params));
+        const d   = await res.json();
+        if (d.funnel) renderFunnelChart(d.funnel);
+    } catch(e) { console.error('fetchFunnelCustom', e); }
+}
+
+async function fetchSourcesCustom(from, to) {
+    try {
+        const res = await fetch(buildUrl('/api/sources', { from: from, to: to }));
+        const d   = await res.json();
+        if (d.sources) renderDonut(d.sources);
+    } catch(e) { console.error('fetchSourcesCustom', e); }
+}
+
+async function fetchManagersCustom(from, to) {
+    const myGen = ++_mgrGen;
+    const container = document.querySelector('.managers-card .managers-list');
+    if (container) container.innerHTML = '<div style="display:flex;align-items:center;justify-content:center;height:220px;"><div style="width:36px;height:36px;border-radius:50%;border:3px solid var(--border-color);border-top-color:var(--accent-primary);animation:mgr-spin 0.8s linear infinite;"></div></div>';
+    try {
+        const res = await fetch(buildUrl('/api/managers', { from: from, to: to }));
+        const d   = await res.json();
+        if (myGen !== _mgrGen) return;
+        if (d.managers) currentManagers = d.managers;
+        dashMgrPage = 1;
+        renderManagersWidget(sortMgr(currentManagers, currentManagerSort));
+        if (dealsInProgressData.deals.length > 0) renderDealsTable();
+    } catch(e) { console.error('fetchManagersCustom', e); }
+}
+
+async function fetchChannelsCustom(from, to) {
+    const chnContainer = document.getElementById('channels-container');
+    if (chnContainer) chnContainer.innerHTML = '<div style="display:flex;align-items:center;justify-content:center;height:120px;"><div style="width:28px;height:28px;border-radius:50%;border:3px solid var(--border-color);border-top-color:var(--accent-primary);animation:mgr-spin 0.8s linear infinite;"></div></div>';
+    try {
+        const res = await fetch(buildUrl('/api/channels', { from: from, to: to }));
+        const d   = await res.json();
+        if (d.sources) {
+            allChannelsWon = d.wonBySource || {};
+            renderChannels(d.sources, d.wonBySource || {});
+        }
+    } catch(e) { console.error('fetchChannelsCustom', e); }
+}
+
 function initAll() {
     loadFunnels();       // loadFunnels() calls fetchFunnel() after auto-selecting first funnel
     fetchKPI(kpiPeriod);
@@ -207,9 +444,12 @@ function showAllSkeletons() {
 // ── 1. KPI ─────────────────────────────────────────────────────
 async function fetchKPI(period) {
     kpiPeriod = period;
-    updateDateRangeDisplay(period);
+    if (!customDateFrom) updateDateRangeDisplay(period);
     try {
-        const res = await fetch(buildUrl('/api/kpi', { period: period }));
+        var kpiParams = customDateFrom && customDateTo
+            ? { from: customDateFrom, to: customDateTo }
+            : { period: period };
+        const res = await fetch(buildUrl('/api/kpi', kpiParams));
         const d   = await res.json();
         if (d.error) return;
         setKPI('.kpi-card.revenue .kpi-value',   d.revenue,        '', ' ₽');

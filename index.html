@@ -101,9 +101,27 @@
                     <button class="filter-btn main-kpi-btn" data-period="week">Неделя</button>
                     <button class="filter-btn main-kpi-btn" data-period="month">Месяц</button>
                 </div>
-                <div class="date-range">
+                <div class="date-range" id="date-range-btn" onclick="toggleDatePicker()" style="cursor:pointer;user-select:none;" title="Выбрать период">
                     <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="width:16px;height:16px;"><rect x="3" y="4" width="18" height="18" rx="2" ry="2"/><line x1="16" y1="2" x2="16" y2="6"/><line x1="8" y1="2" x2="8" y2="6"/><line x1="3" y1="10" x2="21" y2="10"/></svg>
                     <span id="date-range-text">—</span>
+                </div>
+                <!-- Custom date picker popover -->
+                <div id="date-picker-popover" style="display:none;position:absolute;top:72px;right:80px;background:var(--bg-card);border:1px solid var(--border-color);border-radius:var(--radius-lg);padding:16px;z-index:200;box-shadow:0 4px 24px rgba(0,0,0,0.12);min-width:280px;">
+                    <div style="font-size:0.75rem;font-weight:600;color:var(--text-secondary);margin-bottom:12px;text-transform:uppercase;letter-spacing:.05em;">Произвольный период</div>
+                    <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-bottom:12px;">
+                        <div>
+                            <label style="font-size:0.75rem;color:var(--text-secondary);display:block;margin-bottom:4px;">От</label>
+                            <input type="date" id="custom-date-from" style="width:100%;padding:6px 8px;border:1px solid var(--border-color);border-radius:var(--radius-sm);background:var(--bg-tertiary);color:var(--text-primary);font-size:0.8125rem;">
+                        </div>
+                        <div>
+                            <label style="font-size:0.75rem;color:var(--text-secondary);display:block;margin-bottom:4px;">До</label>
+                            <input type="date" id="custom-date-to" style="width:100%;padding:6px 8px;border:1px solid var(--border-color);border-radius:var(--radius-sm);background:var(--bg-tertiary);color:var(--text-primary);font-size:0.8125rem;">
+                        </div>
+                    </div>
+                    <div style="display:flex;gap:8px;">
+                        <button onclick="applyCustomDateRange()" style="flex:1;padding:7px;background:var(--accent-primary);color:white;border:none;border-radius:var(--radius-sm);cursor:pointer;font-size:0.8125rem;font-weight:600;">Применить</button>
+                        <button onclick="clearCustomDateRange()" style="padding:7px 12px;border:1px solid var(--border-color);background:transparent;color:var(--text-secondary);border-radius:var(--radius-sm);cursor:pointer;font-size:0.8125rem;">Сбросить</button>
+                    </div>
                 </div>
                 <button class="refresh-btn">
                     <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="23 4 23 10 17 10"/><polyline points="1 20 1 14 7 14"/><path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15"/></svg>
@@ -222,10 +240,11 @@
                     </div>
                     <div class="widget-subrow">
                         <select id="funnel-select" class="chart-select"><option value="all">Все воронки</option></select>
-                        <div class="date-filter" style="margin:0;">
+                        <div class="date-filter" style="margin:0;display:flex;align-items:center;gap:2px;">
                             <button class="widget-filter-btn funnel-period-btn active" data-period="day">День</button>
                             <button class="widget-filter-btn funnel-period-btn" data-period="week">Неделя</button>
                             <button class="widget-filter-btn funnel-period-btn" data-period="month">Месяц</button>
+                            <button class="widget-filter-btn widget-cal-btn" id="cal-btn-funnel" data-widget="funnel" onclick="openWidgetPicker('funnel',this)" title="Произвольный период" style="padding:3px 6px;"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="width:14px;height:14px;"><rect x="3" y="4" width="18" height="18" rx="2" ry="2"/><line x1="16" y1="2" x2="16" y2="6"/><line x1="8" y1="2" x2="8" y2="6"/><line x1="3" y1="10" x2="21" y2="10"/></svg></button>
                         </div>
                     </div>
                 </div>
@@ -245,10 +264,11 @@
                         <div id="sources-help-anchor"></div>
                     </div>
                     <div class="widget-subrow">
-                        <div class="date-filter" style="margin:0;">
+                        <div class="date-filter" style="margin:0;display:flex;align-items:center;gap:2px;">
                             <button class="widget-filter-btn sources-period-btn active" data-period="day">День</button>
                             <button class="widget-filter-btn sources-period-btn" data-period="week">Неделя</button>
                             <button class="widget-filter-btn sources-period-btn" data-period="month">Месяц</button>
+                            <button class="widget-filter-btn widget-cal-btn" id="cal-btn-sources" data-widget="sources" onclick="openWidgetPicker('sources',this)" title="Произвольный период" style="padding:3px 6px;"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="width:14px;height:14px;"><rect x="3" y="4" width="18" height="18" rx="2" ry="2"/><line x1="16" y1="2" x2="16" y2="6"/><line x1="8" y1="2" x2="8" y2="6"/><line x1="3" y1="10" x2="21" y2="10"/></svg></button>
                         </div>
                     </div>
                 </div>
@@ -281,10 +301,11 @@
                             <option>По выручке</option>
                             <option>По сделкам</option>
                         </select>
-                        <div class="date-filter" style="margin:0;">
+                        <div class="date-filter" style="margin:0;display:flex;align-items:center;gap:2px;">
                             <button class="widget-filter-btn mgr-period-btn active" data-period="day">День</button>
                             <button class="widget-filter-btn mgr-period-btn" data-period="week">Неделя</button>
                             <button class="widget-filter-btn mgr-period-btn" data-period="month">Месяц</button>
+                            <button class="widget-filter-btn widget-cal-btn" id="cal-btn-managers" data-widget="managers" onclick="openWidgetPicker('managers',this)" title="Произвольный период" style="padding:3px 6px;"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="width:14px;height:14px;"><rect x="3" y="4" width="18" height="18" rx="2" ry="2"/><line x1="16" y1="2" x2="16" y2="6"/><line x1="8" y1="2" x2="8" y2="6"/><line x1="3" y1="10" x2="21" y2="10"/></svg></button>
                         </div>
                     </div>
                 </div>
@@ -340,10 +361,11 @@
                             <option value="leads">Лиды</option>
                             <option value="conversion">Конверсия</option>
                         </select>
-                        <div class="date-filter" style="margin:0;">
+                        <div class="date-filter" style="margin:0;display:flex;align-items:center;gap:2px;">
                             <button class="widget-filter-btn chn-period-btn active" data-period="day">День</button>
                             <button class="widget-filter-btn chn-period-btn" data-period="week">Неделя</button>
                             <button class="widget-filter-btn chn-period-btn" data-period="month">Месяц</button>
+                            <button class="widget-filter-btn widget-cal-btn" id="cal-btn-channels" data-widget="channels" onclick="openWidgetPicker('channels',this)" title="Произвольный период" style="padding:3px 6px;"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="width:14px;height:14px;"><rect x="3" y="4" width="18" height="18" rx="2" ry="2"/><line x1="16" y1="2" x2="16" y2="6"/><line x1="8" y1="2" x2="8" y2="6"/><line x1="3" y1="10" x2="21" y2="10"/></svg></button>
                         </div>
                     </div>
                 </div>
@@ -383,6 +405,24 @@
         </div>
 
     </main>
+</div>
+<!-- Shared widget date picker popover -->
+<div id="widget-date-popover" style="display:none;position:fixed;background:var(--bg-card);border:1px solid var(--border-color);border-radius:var(--radius-lg);padding:16px;z-index:300;box-shadow:0 4px 24px rgba(0,0,0,0.15);min-width:260px;">
+    <div style="font-size:0.75rem;font-weight:600;color:var(--text-secondary);margin-bottom:10px;text-transform:uppercase;letter-spacing:.05em;">Период</div>
+    <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-bottom:10px;">
+        <div>
+            <label style="font-size:0.75rem;color:var(--text-secondary);display:block;margin-bottom:3px;">От</label>
+            <input type="date" id="widget-date-from" style="width:100%;padding:5px 7px;border:1px solid var(--border-color);border-radius:var(--radius-sm);background:var(--bg-tertiary);color:var(--text-primary);font-size:0.8125rem;">
+        </div>
+        <div>
+            <label style="font-size:0.75rem;color:var(--text-secondary);display:block;margin-bottom:3px;">До</label>
+            <input type="date" id="widget-date-to" style="width:100%;padding:5px 7px;border:1px solid var(--border-color);border-radius:var(--radius-sm);background:var(--bg-tertiary);color:var(--text-primary);font-size:0.8125rem;">
+        </div>
+    </div>
+    <div style="display:flex;gap:6px;">
+        <button onclick="applyWidgetPicker()" style="flex:1;padding:6px;background:var(--accent-primary);color:white;border:none;border-radius:var(--radius-sm);cursor:pointer;font-size:0.8125rem;font-weight:600;">Применить</button>
+        <button onclick="clearWidgetPicker()" style="padding:6px 10px;border:1px solid var(--border-color);background:transparent;color:var(--text-secondary);border-radius:var(--radius-sm);cursor:pointer;font-size:0.8125rem;">Сбросить</button>
+    </div>
 </div>
 <script src="help-tooltips.js"></script>
 <script src="onboarding.js"></script>

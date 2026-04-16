@@ -70,11 +70,16 @@ async function getSuccessStageIds(client) {
 }
 
 /** Compute date range from period string.
- *  day   = from 00:00 today (current day only)
- *  week  = last 7 days
- *  month = last 30 days
+ *  day    = from 00:00 today (current day only)
+ *  week   = last 7 days
+ *  month  = last 30 days
+ *  custom = uses fromDate/toDate override params directly
  */
-function parsePeriod(period) {
+function parsePeriod(period, fromDate, toDate) {
+    // Custom range: client passes explicit from/to dates
+    if (fromDate && toDate) {
+        return { from: fromDate, to: toDate + 'T23:59:59' };
+    }
     const today = new Date();
     const todayStr = today.toISOString().split('T')[0];
     const todayEnd = todayStr + 'T23:59:59';
@@ -148,16 +153,15 @@ app.get('/api/kpi', async (req, res) => {
     try {
         const client = getClient(req);
         const { period = 'month', categoryId } = req.query;
-        const { from, to } = parsePeriod(period);
-        const prev = prevPeriod(from, to);
+        const { from, to } = parsePeriod(period, req.query.from, req.query.to);
+        const isCustomRange = !!(req.query.from && req.query.to);
+        const prev = isCustomRange ? null : prevPeriod(from, to);
 
         const catFilter = categoryId && categoryId !== 'all' ? { CATEGORY_ID: categoryId } : {};
         const successStageIds = await getSuccessStageIds(client);
 
         const [successDeals, allDeals, prevSuccessDeals, prevAllDeals] = await Promise.all([
             // Current: deals CREATED in period that are currently in a success stage
-            // NOTE: using DATE_CREATE (not DATE_MODIFY) to avoid counting old deals
-            // that were merely opened/commented and happen to be in a success stage.
             successStageIds.length > 0
                 ? getAll(client, 'crm.deal.list', {
                     filter: { STAGE_ID: successStageIds, '>=DATE_CREATE': from, '<=DATE_CREATE': to, ...catFilter },
@@ -171,19 +175,20 @@ app.get('/api/kpi', async (req, res) => {
                 select: ['ID']
             }),
 
-            // Previous: success deals (same DATE_CREATE logic)
-            successStageIds.length > 0
+            // Previous: skip when custom range — no meaningful comparison period
+            (!isCustomRange && successStageIds.length > 0)
                 ? getAll(client, 'crm.deal.list', {
                     filter: { STAGE_ID: successStageIds, '>=DATE_CREATE': prev.from, '<=DATE_CREATE': prev.to, ...catFilter },
                     select: ['OPPORTUNITY']
                   })
                 : Promise.resolve({ result: [], total: 0 }),
 
-            // Previous: all deals
-            getAll(client, 'crm.deal.list', {
-                filter: { '>=DATE_CREATE': prev.from, '<=DATE_CREATE': prev.to, ...catFilter },
-                select: ['ID']
-            })
+            (!isCustomRange)
+                ? getAll(client, 'crm.deal.list', {
+                    filter: { '>=DATE_CREATE': prev.from, '<=DATE_CREATE': prev.to, ...catFilter },
+                    select: ['ID']
+                  })
+                : Promise.resolve({ result: [], total: 0 })
         ]);
 
         const revenue     = successDeals.result.reduce((s, d) => s + parseFloat(d.OPPORTUNITY || 0), 0);
@@ -310,7 +315,7 @@ app.get('/api/deals/leads', async (req, res) => {
     try {
         const client = getClient(req);
         const { period = 'month' } = req.query;
-        const { from, to } = parsePeriod(period);
+        const { from, to } = parsePeriod(period, req.query.from, req.query.to);
         const stageMap = await buildStageMap(client);
 
         const allDeals = await getAll(client, 'crm.deal.list', {
@@ -349,7 +354,7 @@ app.get('/api/funnel', async (req, res) => {
     try {
         const client = getClient(req);
         const { period = 'month', categoryId } = req.query;
-        const { from, to } = parsePeriod(period);
+        const { from, to } = parsePeriod(period, req.query.from, req.query.to);
 
         const catFilter   = categoryId && categoryId !== 'all' ? { CATEGORY_ID: categoryId } : {};
         const stageListId = categoryId && categoryId !== 'all' ? parseInt(categoryId) : 0;
@@ -409,7 +414,7 @@ app.get('/api/sources', async (req, res) => {
     try {
         const client = getClient(req);
         const { period = 'day' } = req.query;
-        const { from, to } = parsePeriod(period);
+        const { from, to } = parsePeriod(period, req.query.from, req.query.to);
 
         const [deals, sourceStatuses] = await Promise.all([
             getAll(client, 'crm.deal.list', {
@@ -451,7 +456,7 @@ app.get('/api/managers', async (req, res) => {
     try {
         const client = getClient(req);
         const { period = 'day', categoryId } = req.query;
-        const { from, to } = parsePeriod(period);
+        const { from, to } = parsePeriod(period, req.query.from, req.query.to);
         const catFilter = categoryId && categoryId !== 'all' ? { CATEGORY_ID: categoryId } : {};
 
         // Roster window: always last 30 days regardless of selected period
@@ -571,7 +576,7 @@ app.get('/api/channels', async (req, res) => {
     try {
         const client = getClient(req);
         const { period = 'day' } = req.query;
-        const { from, to } = parsePeriod(period);
+        const { from, to } = parsePeriod(period, req.query.from, req.query.to);
 
         const successStageIds = await getSuccessStageIds(client);
 
@@ -681,7 +686,7 @@ app.get('/api/debug/manager-revenue', async (req, res) => {
         const { managerId, period = 'month' } = req.query;
         if (!managerId) return res.status(400).json({ error: 'managerId required' });
 
-        const { from, to } = parsePeriod(period);
+        const { from, to } = parsePeriod(period, req.query.from, req.query.to);
         const successStageIds = await getSuccessStageIds(client);
         const stageMap = await buildStageMap(client);
 
@@ -732,7 +737,7 @@ app.get('/api/debug/manager-all', async (req, res) => {
         const { managerId, period = 'month' } = req.query;
         if (!managerId) return res.status(400).json({ error: 'managerId required' });
 
-        const { from, to } = parsePeriod(period);
+        const { from, to } = parsePeriod(period, req.query.from, req.query.to);
         const stageMap = await buildStageMap(client);
 
         const deals = await getAll(client, 'crm.deal.list', {
