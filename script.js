@@ -379,8 +379,9 @@ async function fetchFunnel(period, category) {
 }
 
 function renderFunnelChart(funnel) {
-    // Keep pipeline order from server (Bitrix stage sort order), don't re-sort by count
-    lastFunnelData = funnel;
+    // Sort stages by deal count descending
+    var sorted = Object.entries(funnel).sort(function(a, b) { return b[1] - a[1]; });
+    lastFunnelData = Object.fromEntries(sorted);
     funnelPage = 1;
     drawFunnel();
 }
@@ -471,8 +472,10 @@ function renderDonut(sources) {
     const colors  = ['#6366f1','#2fc6f6','#ffa900','#9dcf00','#ec4899','#14b8a6','#ff5752','#ab7fe6'];
     const entries = Object.entries(sources);
 
-    // Store all entries with colour for pagination
-    allSourcesEntries = entries.map(function(e, i) {
+    // Sort by count descending so most popular source is always first,
+    // then assign colours based on sorted position.
+    var sortedEntries = entries.slice().sort(function(a, b) { return b[1] - a[1]; });
+    allSourcesEntries = sortedEntries.map(function(e, i) {
         return { name: e[0], count: e[1], color: colors[i % colors.length] };
     });
     sourcesPage = 1;
@@ -541,33 +544,28 @@ function changeSourcesPage(dir) {
 }
 
 // ── 5. Managers ────────────────────────────────────────────────
-// AbortController to cancel in-flight requests when period changes quickly
-var _mgrAbortCtrl = null;
+// Generation counter — each call gets a unique ID.
+// If a newer call arrives before this one resolves, we discard the stale response.
+var _mgrGen = 0;
 
 async function fetchManagers(period) {
-    // Cancel previous in-flight request — prevents old slow Month response
-    // from overwriting a newer Day response (race condition fix)
-    if (_mgrAbortCtrl) { _mgrAbortCtrl.abort(); }
-    _mgrAbortCtrl = new AbortController();
-    const signal = _mgrAbortCtrl.signal;
+    const myGen = ++_mgrGen;
 
     mgrPeriod = period;
     setBtnActive('.mgr-period-btn', period);
 
-    // Reset immediately so stale data from previous period never shows
-    currentManagers = [];
-
     const container = document.querySelector('.managers-card .managers-list');
     if (container) container.innerHTML = '<div style="display:flex;align-items:center;justify-content:center;height:220px;"><div style="width:36px;height:36px;border-radius:50%;border:3px solid var(--border-color);border-top-color:var(--accent-primary);animation:mgr-spin 0.8s linear infinite;"></div></div><style>@keyframes mgr-spin{to{transform:rotate(360deg)}}</style>';
     try {
-        const res = await fetch(buildUrl('/api/managers', { period: period }), { signal });
+        const res = await fetch(buildUrl('/api/managers', { period: period }));
         const d   = await res.json();
+        // Discard if a newer request was started while we were waiting
+        if (myGen !== _mgrGen) return;
         if (d.managers) currentManagers = d.managers;
         dashMgrPage = 1;
         renderManagersWidget(sortMgr(currentManagers, currentManagerSort));
         if (dealsInProgressData.deals.length > 0) renderDealsTable();
     } catch(e) {
-        if (e.name === 'AbortError') return;
         console.error('fetchManagers', e);
     }
 }
@@ -598,9 +596,11 @@ function renderManagersWidget(managers) {
             subtitle = (m.converted || 0) + ' конвертированных';
             rightVal = (m.converted || 0) + ' конв.';
         } else if (by === 'deals') {
-            barPct   = maxTotal > 0 ? Math.round((m.total || 0) / maxTotal * 100) : 0;
-            subtitle = (m.total || 0) + ' лидов';
-            rightVal = (m.total || 0) + ' сд.';
+            // "По сделкам" показывает успешно завершённые сделки (те же что в выручке)
+            var maxDeals = Math.max.apply(null, managers.map(function(mm) { return mm.deals || 0; }).concat([1]));
+            barPct   = maxDeals > 0 ? Math.round((m.deals || 0) / maxDeals * 100) : 0;
+            subtitle = (m.deals || 0) + ' успешных сделок';
+            rightVal = (m.deals || 0) + ' усп.';
         } else {
             barPct   = maxRev > 0 ? Math.round(m.revenue / maxRev * 100) : 0;
             subtitle = (m.deals || 0) + ' успешных';
@@ -633,7 +633,7 @@ function changeDashMgrPage(dir) {
 function sortMgr(managers, by) {
     return managers.slice().sort(function(a,b) {
         if (by === 'revenue')  return b.revenue - a.revenue;
-        if (by === 'deals')    return (b.total || 0) - (a.total || 0);   // все сделки включая Новые
+        if (by === 'deals')    return (b.deals || 0) - (a.deals || 0);   // успешные сделки
         return (b.converted || 0) - (a.converted || 0);                  // сортировка по числу конвертированных
     });
 }
@@ -949,8 +949,11 @@ function renderPageManagers(managers) {
     const totalPgs = Math.ceil(managers.length / pageMgrPerPage);
     const start    = (pageMgrPageNum - 1) * pageMgrPerPage;
     const page     = managers.slice(start, start + pageMgrPerPage);
-    const totalRev = managers.reduce(function(s,m) { return s + m.revenue; }, 0);
-    const totalDls = managers.reduce(function(s,m) { return s + m.deals; }, 0);
+    const totalRev       = managers.reduce(function(s,m) { return s + m.revenue; }, 0);
+    const totalDls       = managers.reduce(function(s,m) { return s + m.deals; }, 0);
+    const totalConverted = managers.reduce(function(s,m) { return s + (m.converted || 0); }, 0);
+    const totalLeads     = managers.reduce(function(s,m) { return s + (m.total    || 0); }, 0);
+    const pageConvRate   = totalLeads > 0 ? (totalConverted / totalLeads * 100).toFixed(1) : '0.0';
 
     const rows = page.map(function(m, i) {
         const gi  = start + i;
@@ -969,9 +972,9 @@ function renderPageManagers(managers) {
 
     container.innerHTML =
         '<div style="display:grid;grid-template-columns:repeat(3,1fr);gap:16px;margin-bottom:24px;">' +
-        '<div class="chart-card" style="text-align:center;padding:24px;"><div style="font-size:2rem;font-weight:800;color:var(--accent-primary)">' + managers.length + '</div><div style="color:var(--text-secondary);margin-top:4px;">Всего менеджеров</div></div>' +
-        '<div class="chart-card" style="text-align:center;padding:24px;"><div style="font-size:2rem;font-weight:800;color:var(--success)">' + fmtMoney(totalRev) + '</div><div style="color:var(--text-secondary);margin-top:4px;">Общая выручка</div></div>' +
-        '<div class="chart-card" style="text-align:center;padding:24px;"><div style="font-size:2rem;font-weight:800;color:var(--warning)">' + totalDls + '</div><div style="color:var(--text-secondary);margin-top:4px;">Всего сделок</div></div>' +
+        '<div class="chart-card" style="text-align:center;padding:24px;"><div style="font-size:2rem;font-weight:800;color:var(--accent-primary)">' + fmtMoney(totalRev) + '</div><div style="color:var(--text-secondary);margin-top:4px;">Общая выручка</div></div>' +
+        '<div class="chart-card" style="text-align:center;padding:24px;"><div style="font-size:2rem;font-weight:800;color:var(--success)">' + totalDls + '</div><div style="color:var(--text-secondary);margin-top:4px;">Успешных сделок</div></div>' +
+        '<div class="chart-card" style="text-align:center;padding:24px;"><div style="font-size:2rem;font-weight:800;color:var(--warning)">' + pageConvRate + '%</div><div style="color:var(--text-secondary);margin-top:4px;">Конверсия</div></div>' +
         '</div>' +
         '<div class="chart-card">' +
         '<div class="chart-header"><h3>Рейтинг менеджеров</h3>' +
@@ -1008,20 +1011,39 @@ async function loadPageLeads(status, period) {
     pageLeadsPeriod = period;
     const container = document.getElementById('leads-table-container');
     if (!container) return;
-    container.innerHTML = '<div style="padding:32px;text-align:center;color:var(--text-secondary);">Загрузка...</div>';
+    container.innerHTML = '<div style="display:flex;align-items:center;justify-content:center;height:160px;"><div style="width:32px;height:32px;border-radius:50%;border:3px solid var(--border-color);border-top-color:var(--accent-primary);animation:mgr-spin 0.8s linear infinite;"></div></div>';
     try {
-        const res = await fetch(buildUrl('/api/deals/in-progress'));
+        // Use /api/deals/leads which includes FAIL_STAGES deals (unlike in-progress)
+        const res = await fetch(buildUrl('/api/deals/leads', { period: period }));
         const d   = await res.json();
-        let leads = (d.deals || []).map(function(deal) {
+
+        var allDeals = (d.deals || []).map(function(deal) {
+            // Resolve manager name and photo from currentManagers cache
+            var mgr = currentManagers.find(function(m) { return String(m.id) === String(deal.ASSIGNED_BY_ID); });
+            var mgrName  = mgr ? mgr.name : ('Менеджер ' + (deal.ASSIGNED_BY_ID || '?'));
+            var mgrPhoto = mgr && mgr.photo ? mgr.photo : null;
+            var mgrInit  = mgr
+                ? mgr.name.split(' ').map(function(n) { return n[0]; }).join('').slice(0,2)
+                : String(deal.ASSIGNED_BY_ID || '?').slice(0,2);
             return {
-                id: deal.ID, title: deal.TITLE || 'Без названия',
-                source: deal.stageName || '—', status: deal.STAGE_ID,
+                id:         deal.ID,
+                title:      deal.TITLE || 'Без названия',
+                stageName:  deal.stageName || '—',
+                isFail:     deal.isFail    || false,
+                isSuccess:  deal.isSuccess || false,
                 dateCreate: deal.DATE_CREATE,
-                assignedName: 'Менеджер ' + deal.ASSIGNED_BY_ID
+                mgrName, mgrPhoto, mgrInit
             };
         });
-        if (status === 'accepted') leads = leads.filter(function(l) { return !l.status.includes('LOSE') && !l.status.includes('JUNK'); });
-        else if (status === 'rejected') leads = leads.filter(function(l) { return l.status.includes('LOSE') || l.status.includes('JUNK'); });
+
+        // Все = все сделки (успешные + в работе + неуспешные)
+        // Принятые = успешные + в работе (!isFail)
+        // Непринятые = только FAIL_STAGES
+        var leads;
+        if (status === 'accepted')      leads = allDeals.filter(function(l) { return !l.isFail; });
+        else if (status === 'rejected') leads = allDeals.filter(function(l) { return l.isFail; });
+        else                            leads = allDeals;
+
         currentLeads = leads; leadsPage = 1; renderLeadsPage();
     } catch(e) {
         container.innerHTML = '<div style="padding:32px;color:var(--danger);">Ошибка загрузки</div>';
@@ -1034,18 +1056,29 @@ function renderLeadsPage() {
     if (!currentLeads.length) { container.innerHTML = '<div style="padding:32px;text-align:center;color:var(--text-secondary);">Нет обращений</div>'; return; }
     const totalPgs = Math.ceil(currentLeads.length / leadsPerPage);
     const page = currentLeads.slice((leadsPage-1)*leadsPerPage, leadsPage*leadsPerPage);
+    var failBadge    = 'background:var(--bg-danger,#fcebeb);color:var(--danger,#e24b4a);';
+    var successBadge = 'background:var(--bg-success,#eaf3de);color:var(--success,#3b6d11);';
+    var okBadge      = 'background:var(--bg-tertiary);color:var(--text-secondary);';
     container.innerHTML =
         '<div style="padding:16px;border-bottom:1px solid var(--border-color);display:flex;justify-content:space-between;">' +
         '<span style="font-weight:600;">Всего: ' + currentLeads.length + '</span>' +
         '<span style="font-size:0.8125rem;color:var(--text-secondary);">' + leadsPage + ' / ' + totalPgs + '</span></div>' +
-        '<div class="deals-table-wrapper"><table class="deals-table">' +
-        '<thead><tr><th>Обращение</th><th>Источник</th><th>Менеджер</th><th>Статус</th><th>Дата</th></tr></thead>' +
+        '<div class="deals-table-wrapper"><table class="deals-table" style="table-layout:fixed;">' +
+        '<colgroup><col style="width:30%"><col style="width:20%"><col style="width:34%"><col style="width:16%"></colgroup>' +
+        '<thead><tr><th>Обращение</th><th>Менеджер</th><th>Статус / Этап</th><th>Дата</th></tr></thead>' +
         '<tbody>' + page.map(function(l) {
-            return '<tr><td class="deal-name"><span class="deal-id">#' + l.id + '</span>' + l.title + '</td>' +
-                '<td>' + (l.source||'—') + '</td>' +
-                '<td><div style="display:flex;align-items:center;gap:8px;"><div class="cell-avatar">' + (l.assignedName||'М').charAt(0) + '</div><span style="font-size:0.8125rem;">' + l.assignedName + '</span></div></td>' +
-                '<td><span style="padding:4px 10px;border-radius:4px;font-size:0.6875rem;font-weight:600;background:var(--bg-tertiary);color:var(--text-secondary);">' + (l.status||'—') + '</span></td>' +
-                '<td style="font-size:0.8125rem;color:var(--text-secondary);">' + new Date(l.dateCreate).toLocaleDateString('ru-RU') + '</td></tr>';
+            var badge = l.isFail ? failBadge : (l.isSuccess ? successBadge : okBadge);
+            var photoStyle = l.mgrPhoto
+                ? 'background-image:url(\'' + l.mgrPhoto + '\');background-size:cover;background-position:center;'
+                : '';
+            return '<tr onclick="window.open(\'https://robotcorporation.bitrix24.ru/crm/deal/details/' + l.id + '/\',\'_blank\')" style="cursor:pointer;">' +
+                '<td class="deal-name" style="overflow:hidden;"><span class="deal-id">#' + l.id + '</span>' +
+                '<span style="overflow:hidden;text-overflow:ellipsis;display:block;white-space:nowrap;">' + escapeHtml(l.title) + '</span></td>' +
+                '<td><div style="display:flex;align-items:center;gap:6px;overflow:hidden;">' +
+                '<div class="cell-avatar" style="flex-shrink:0;' + photoStyle + '">' + (photoStyle ? '' : escapeHtml(l.mgrInit)) + '</div>' +
+                '<span style="font-size:0.8125rem;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">' + escapeHtml(l.mgrName) + '</span></div></td>' +
+                '<td style="overflow:hidden;"><span style="padding:3px 8px;border-radius:4px;font-size:0.6875rem;font-weight:600;white-space:nowrap;' + badge + '">' + escapeHtml(l.stageName) + '</span></td>' +
+                '<td style="font-size:0.8125rem;color:var(--text-secondary);white-space:nowrap;">' + new Date(l.dateCreate).toLocaleDateString('ru-RU') + '</td></tr>';
         }).join('') + '</tbody></table></div>' +
         '<div style="display:flex;justify-content:center;align-items:center;gap:8px;padding:12px;border-top:1px solid var(--border-color);">' + pgHTML(leadsPage, totalPgs, 'changeLeadsPage') + '</div>';
 }

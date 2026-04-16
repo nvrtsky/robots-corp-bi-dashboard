@@ -16,14 +16,13 @@ app.use(express.static(__dirname));
 const SUCCESS_STAGES = [
     "Заявки на рассылку", "Квалифицирован", "NPS собран",
     "Экскурсия проведена", "День рождения проведен",
+    "Отправили информацию", "Назначен просмотр"
 ];
-
 const FAIL_STAGES = [
     "Выбрали что-то другое", "Не подошли условия",
     "Не отвечает более 3х раз", "Запрос в техподдержку закрыт", "Спам",
     "Потребность исчезла",
-    "СПАМ", "Не отвечает более 3х суток", "Отложили",
-    "Дорого"
+    "СПАМ", "Не отвечает более 3х суток", "Отложили"
 ];
 
 // ── Shared helpers ─────────────────────────────────────────────
@@ -300,6 +299,47 @@ app.get('/api/deals/in-progress', async (req, res) => {
         });
     } catch (e) {
         console.error('[Deals In Progress Error]', e.message);
+        res.status(500).json({ error: e.message });
+    }
+});
+
+// ── Endpoint: Deals for Leads page ───────────────────────────
+// Returns ALL deals from last 30 days INCLUDING failed ones.
+// Client filters: "accepted" = in-progress, "rejected" = FAIL_STAGES, "all" = both.
+app.get('/api/deals/leads', async (req, res) => {
+    try {
+        const client = getClient(req);
+        const { period = 'month' } = req.query;
+        const { from, to } = parsePeriod(period);
+        const stageMap = await buildStageMap(client);
+
+        const allDeals = await getAll(client, 'crm.deal.list', {
+            filter: { '>=DATE_CREATE': from, '<=DATE_CREATE': to },
+            select: ['ID', 'TITLE', 'ASSIGNED_BY_ID', 'DATE_CREATE',
+                     'STAGE_ID', 'SEMANTIC', 'CONTACT_ID', 'SOURCE_ID']
+        });
+
+        const deals = allDeals.result.map(deal => {
+            const stageName = stageMap[deal.STAGE_ID] || deal.STAGE_ID;
+            const isFail    = FAIL_STAGES.includes(stageName) || deal.SEMANTIC === 'F';
+            const isSuccess = SUCCESS_STAGES.includes(stageName) || deal.SEMANTIC === 'S';
+            return {
+                ID:             deal.ID,
+                TITLE:          deal.TITLE || 'Без названия',
+                ASSIGNED_BY_ID: deal.ASSIGNED_BY_ID,
+                DATE_CREATE:    deal.DATE_CREATE,
+                STAGE_ID:       deal.STAGE_ID,
+                stageName,
+                isFail,
+                isSuccess
+            };
+        });
+        // Include ALL deals: success + in-progress + failed
+        // Client filters by isFail / isSuccess
+
+        res.json({ deals, total: deals.length });
+    } catch (e) {
+        console.error('[Deals Leads Error]', e.message);
         res.status(500).json({ error: e.message });
     }
 });
