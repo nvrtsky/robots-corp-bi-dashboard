@@ -46,8 +46,69 @@ async function getAll(client, method, params = {}) {
     return { result: allItems, total: total || allItems.length };
 }
 
-/** Build STAGE_ID → stage name map across all funnels */
-async function buildStageMap(client) {
+// ── Manager roster cache (TTL = 30 min per domain) ────────────
+// Caches the list of manager IDs + user details (name/photo).
+// Avoids re-fetching 30 days of deals just to know who exists.
+const _rosterCache = {};          // domain → { managers: [{id,name,photo}], expiresAt }
+const ROSTER_TTL   = 30 * 60 * 1000;
+
+async function getRoster(client, domain) {
+    const cached = _rosterCache[domain];
+    if (cached && Date.now() < cached.expiresAt) return cached.managers;
+
+    // Fetch all deals from last 30 days to build the roster
+    const rosterFrom = new Date();
+    rosterFrom.setMonth(rosterFrom.getMonth() - 1);
+    const rosterFromStr = rosterFrom.toISOString().split('T')[0];
+    const todayStr      = new Date().toISOString().split('T')[0];
+
+    const rosterDeals = await getAll(client, 'crm.deal.list', {
+        filter: { '>=DATE_CREATE': rosterFromStr, '<=DATE_CREATE': todayStr },
+        select: ['ID', 'ASSIGNED_BY_ID']
+    });
+
+    const ids = [...new Set(
+        rosterDeals.result.map(d => String(d.ASSIGNED_BY_ID)).filter(id => id && id !== 'undefined')
+    )];
+
+    let managers = [];
+    if (ids.length > 0) {
+        try {
+            const usersRes = await client.call('user.get', {
+                ID: ids, select: ['ID', 'NAME', 'LAST_NAME', 'PERSONAL_PHOTO']
+            });
+            managers = ids.map(id => {
+                const u = usersRes.result.find(u => String(u.ID) === id);
+                return {
+                    id,
+                    name:  u ? `${u.NAME} ${u.LAST_NAME}`.trim() : `Менеджер ${id}`,
+                    photo: u ? (u.PERSONAL_PHOTO || null) : null
+                };
+            });
+        } catch(e) {
+            managers = ids.map(id => ({ id, name: `Менеджер ${id}`, photo: null }));
+        }
+    }
+
+    _rosterCache[domain] = { managers, expiresAt: Date.now() + ROSTER_TTL };
+    console.log(`[roster] cached ${managers.length} managers for ${domain}`);
+    return managers;
+}
+
+// ── StageMap cache (TTL = 10 min per domain) ──────────────────
+// buildStageMap makes 16+ sequential Bitrix API calls.
+// Caching cuts that to 0 on all repeated requests within the TTL window.
+const _stageMapCache = {};   // domain → { map, expiresAt }
+const STAGE_MAP_TTL  = 10 * 60 * 1000; // 10 minutes in ms
+
+async function buildStageMap(client, domainKey) {
+    const domain = domainKey || client.domain || client._domain || 'default';
+    const cached = _stageMapCache[domain];
+    if (cached && Date.now() < cached.expiresAt) {
+        return cached.map;
+    }
+
+    // Cache miss — fetch from Bitrix
     const stageMap = {};
     const commonStages = await client.call('crm.dealcategory.stage.list', { id: 0 });
     if (commonStages.result) commonStages.result.forEach(s => { stageMap[s.STATUS_ID] = s.NAME; });
@@ -60,14 +121,25 @@ async function buildStageMap(client) {
             } catch (e) { /* ignore individual category errors */ }
         }
     }
+
+    _stageMapCache[domain] = { map: stageMap, expiresAt: Date.now() + STAGE_MAP_TTL };
+    console.log(`[stageMap] cached for ${domain}, ${Object.keys(stageMap).length} stages`);
     return stageMap;
 }
 
-/** Get all STAGE_IDs whose name is in SUCCESS_STAGES */
-async function getSuccessStageIds(client) {
-    const stageMap = await buildStageMap(client);
+/** Get all STAGE_IDs whose name is in SUCCESS_STAGES.
+ *  Accepts an already-built stageMap to avoid double buildStageMap calls. */
+async function getSuccessStageIds(client, existingStageMap) {
+    const stageMap = existingStageMap || await buildStageMap(client);
     return Object.keys(stageMap).filter(id => SUCCESS_STAGES.includes(stageMap[id]));
 }
+
+/** Invalidate stageMap cache for a domain (call after funnel/stage changes) */
+app.post('/api/cache/clear', (req, res) => {
+    const domain = req.query.domain || 'default';
+    delete _stageMapCache[domain];
+    res.json({ cleared: domain });
+});
 
 /** Compute date range from period string.
  *  day    = from 00:00 today (current day only)
@@ -220,7 +292,7 @@ app.get('/api/kpi', async (req, res) => {
 app.get('/api/deals/in-progress', async (req, res) => {
     try {
         const client = getClient(req);
-        const stageMap = await buildStageMap(client);
+        const stageMap = await buildStageMap(client, req.query.domain || 'default');
 
         const monthAgo = new Date();
         monthAgo.setMonth(monthAgo.getMonth() - 1);
@@ -316,7 +388,7 @@ app.get('/api/deals/leads', async (req, res) => {
         const client = getClient(req);
         const { period = 'month' } = req.query;
         const { from, to } = parsePeriod(period, req.query.from, req.query.to);
-        const stageMap = await buildStageMap(client);
+        const stageMap = await buildStageMap(client, req.query.domain || 'default');
 
         const allDeals = await getAll(client, 'crm.deal.list', {
             filter: { '>=DATE_CREATE': from, '<=DATE_CREATE': to },
@@ -459,32 +531,25 @@ app.get('/api/managers', async (req, res) => {
         const { from, to } = parsePeriod(period, req.query.from, req.query.to);
         const catFilter = categoryId && categoryId !== 'all' ? { CATEGORY_ID: categoryId } : {};
 
-        // Roster window: always last 30 days regardless of selected period
-        const rosterFrom = new Date();
-        rosterFrom.setMonth(rosterFrom.getMonth() - 1);
-        const rosterFromStr = rosterFrom.toISOString().split('T')[0];
-        const todayStr      = new Date().toISOString().split('T')[0];
-
-        const [stageMap, successStageIds] = await Promise.all([
-            buildStageMap(client),
-            getSuccessStageIds(client)
-        ]);
+        // Build stageMap once — pass it to getSuccessStageIds to avoid double call
+        const stageMap       = await buildStageMap(client);
+        const successStageIds = await getSuccessStageIds(client, stageMap);
 
         // "Новая заявка" stage names across all funnels
         const NEW_STAGE_NAMES = new Set(['Новая заявка', 'Новая']);
 
-        const [rosterDeals, allPeriodDeals, successDeals] = await Promise.all([
-            // Roster: all deals from last 30 days → full set of manager IDs
-            getAll(client, 'crm.deal.list', {
-                filter: { '>=DATE_CREATE': rosterFromStr, '<=DATE_CREATE': todayStr, ...catFilter },
-                select: ['ID', 'ASSIGNED_BY_ID']
-            }),
-            // All deals in SELECTED period — for conversion rate calculation
+        const domain = req.query.domain || 'default';
+
+        // Parallel: roster from cache + period stats + success deals
+        // Roster cache avoids re-fetching 30 days of deals on every request
+        const [rosterManagers, allPeriodDeals, successDeals] = await Promise.all([
+            getRoster(client, domain),
+            // Period stats: all deals in selected period
             getAll(client, 'crm.deal.list', {
                 filter: { '>=DATE_CREATE': from, '<=DATE_CREATE': to, ...catFilter },
                 select: ['ID', 'ASSIGNED_BY_ID', 'STAGE_ID', 'SEMANTIC']
             }),
-            // Success deals in period — for revenue
+            // Success deals: for revenue
             successStageIds.length > 0
                 ? getAll(client, 'crm.deal.list', {
                     filter: { STAGE_ID: successStageIds, '>=DATE_CREATE': from, '<=DATE_CREATE': to, ...catFilter },
@@ -493,13 +558,12 @@ app.get('/api/managers', async (req, res) => {
                 : Promise.resolve({ result: [] })
         ]);
 
-        // Per-manager stats for selected period
+        // Build per-manager stats from period deals
         const managerStats = {};
 
-        // Count total and converted deals per manager
-        // Converted = not in FAIL_STAGES and not "Новая заявка"
         allPeriodDeals.result.forEach(deal => {
             const id = String(deal.ASSIGNED_BY_ID || 'unknown');
+            if (id === 'unknown') return;
             if (!managerStats[id]) managerStats[id] = { total: 0, converted: 0, count: 0, revenue: 0 };
             const stageName = stageMap[deal.STAGE_ID] || deal.STAGE_ID;
             const isFail = FAIL_STAGES.includes(stageName) || deal.SEMANTIC === 'F';
@@ -516,51 +580,25 @@ app.get('/api/managers', async (req, res) => {
             managerStats[id].revenue += parseFloat(deal.OPPORTUNITY || 0);
         });
 
-        // Build full ID set from 30-day roster
-        const allIds = new Set();
-        rosterDeals.result.forEach(d => { if (d.ASSIGNED_BY_ID) allIds.add(String(d.ASSIGNED_BY_ID)); });
-        Object.keys(managerStats).forEach(id => allIds.add(id));
-
-        const managerIds = Array.from(allIds).filter(id => id !== 'unknown');
-        let managers = [];
-
-        if (managerIds.length > 0) {
-            try {
-                const usersRes = await client.call('user.get', {
-                    ID: managerIds,
-                    select: ['ID', 'NAME', 'LAST_NAME', 'PERSONAL_PHOTO']
-                });
-                managers = managerIds.map(id => {
-                    const user  = usersRes.result.find(u => String(u.ID) === id);
-                    const stats = managerStats[id] || { total: 0, converted: 0, count: 0, revenue: 0 };
-                    const convRate = stats.total > 0
-                        ? parseFloat((stats.converted / stats.total * 100).toFixed(1))
-                        : 0;
-                    return {
-                        id,
-                        name:           user ? `${user.NAME} ${user.LAST_NAME}`.trim() : `Менеджер ${id}`,
-                        photo:          user ? (user.PERSONAL_PHOTO || null) : null,
-                        deals:          stats.count,
-                        revenue:        stats.revenue,
-                        total:          stats.total,
-                        converted:      stats.converted,
-                        conversionRate: convRate
-                    };
-                }).sort((a, b) => {
-                    if (b.revenue !== a.revenue) return b.revenue - a.revenue;
-                    return a.name.localeCompare(b.name, 'ru');
-                });
-            } catch (e) {
-                managers = managerIds.map(id => ({
-                    id, name: `Менеджер ${id}`, photo: null,
-                    deals: managerStats[id]?.count || 0,
-                    revenue: managerStats[id]?.revenue || 0,
-                    total: managerStats[id]?.total || 0,
-                    converted: managerStats[id]?.converted || 0,
-                    conversionRate: 0
-                }));
-            }
-        }
+        // Merge roster (cached) with period stats
+        const managers = rosterManagers.map(u => {
+            const stats = managerStats[u.id] || { total: 0, converted: 0, count: 0, revenue: 0 };
+            const convRate = stats.total > 0
+                ? parseFloat((stats.converted / stats.total * 100).toFixed(1)) : 0;
+            return {
+                id:             u.id,
+                name:           u.name,
+                photo:          u.photo,
+                deals:          stats.count,
+                revenue:        stats.revenue,
+                total:          stats.total,
+                converted:      stats.converted,
+                conversionRate: convRate
+            };
+        }).sort((a, b) => {
+            if (b.revenue !== a.revenue) return b.revenue - a.revenue;
+            return a.name.localeCompare(b.name, 'ru');
+        });
 
         res.json({ managers });
     } catch (e) {
@@ -655,7 +693,7 @@ app.get('/api/health', (req, res) => {
 app.get('/api/debug/stages', async (req, res) => {
     try {
         const client = getClient(req);
-        const stageMap = await buildStageMap(client);
+        const stageMap = await buildStageMap(client, req.query.domain || 'default');
         const successIds = Object.keys(stageMap).filter(id => SUCCESS_STAGES.includes(stageMap[id]));
 
         const allStages = Object.entries(stageMap).map(([id, name]) => ({
@@ -688,7 +726,7 @@ app.get('/api/debug/manager-revenue', async (req, res) => {
 
         const { from, to } = parsePeriod(period, req.query.from, req.query.to);
         const successStageIds = await getSuccessStageIds(client);
-        const stageMap = await buildStageMap(client);
+        const stageMap = await buildStageMap(client, req.query.domain || 'default');
 
         const filter = {
             STAGE_ID:          successStageIds,
@@ -738,7 +776,7 @@ app.get('/api/debug/manager-all', async (req, res) => {
         if (!managerId) return res.status(400).json({ error: 'managerId required' });
 
         const { from, to } = parsePeriod(period, req.query.from, req.query.to);
-        const stageMap = await buildStageMap(client);
+        const stageMap = await buildStageMap(client, req.query.domain || 'default');
 
         const deals = await getAll(client, 'crm.deal.list', {
             filter: {
