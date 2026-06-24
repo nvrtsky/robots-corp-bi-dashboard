@@ -10,6 +10,40 @@ const PORT = process.env.PORT || 3000;
 
 app.use(express.json());
 app.use(express.urlencoded({ extended: false }));
+
+function sanitizeLogValue(value) {
+    if (value === undefined || value === null) return '';
+    return String(value).slice(0, 120).replace(/[\r\n]/g, '');
+}
+
+function sanitizeQueryForLog(query) {
+    const allowed = ['domain', 'period', 'from', 'to', 'categoryId', 'page', 'pageSize', 'durationFilter', 'status', 'forceRefresh'];
+    const safe = {};
+    allowed.forEach(key => {
+        if (query[key] !== undefined) safe[key] = sanitizeLogValue(query[key]);
+    });
+    return safe;
+}
+
+app.use((req, res, next) => {
+    if (!req.path.startsWith('/api/')) return next();
+
+    const started = process.hrtime.bigint();
+    res.locals.cacheStatus = 'none';
+
+    res.on('finish', () => {
+        const durationMs = Number(process.hrtime.bigint() - started) / 1e6;
+        const domain = sanitizeLogValue(req.query.domain || req.headers['x-bitrix-domain']);
+        const query = sanitizeQueryForLog(req.query);
+        console.log(
+            `[api] ${req.method} ${req.path} status=${res.statusCode} ` +
+            `duration=${durationMs.toFixed(0)}ms cache=${res.locals.cacheStatus || 'none'} ` +
+            `domain=${domain || '-'} query=${JSON.stringify(query)}`
+        );
+    });
+
+    next();
+});
 app.use(express.static(__dirname));
 
 // ── Stage constants ────────────────────────────────────────────
@@ -100,6 +134,85 @@ async function getRoster(client, domain) {
 // Caching cuts that to 0 on all repeated requests within the TTL window.
 const _stageMapCache = {};   // domain → { map, expiresAt }
 const STAGE_MAP_TTL  = 10 * 60 * 1000; // 10 minutes in ms
+const _dealsInProgressCache = {}; // domain → { payload, updatedAt, expiresAt }
+const DEALS_IN_PROGRESS_TTL = 2 * 60 * 1000;
+const _dealListCache = {}; // key → { data, updatedAt, expiresAt }
+const _dealListInflight = {}; // key → Promise
+const DEAL_LIST_TTL = 5 * 60 * 1000;
+const DEAL_LIST_CACHE_LIMIT = 100;
+const ANALYTICS_DEAL_SELECT = [
+    'ID', 'TITLE', 'OPPORTUNITY', 'ASSIGNED_BY_ID', 'DATE_CREATE',
+    'STAGE_ID', 'SEMANTIC', 'SOURCE_ID', 'CATEGORY_ID'
+];
+
+function withCacheMeta(payload, status, entry) {
+    return {
+        ...payload,
+        cache: {
+            status,
+            updatedAt: entry.updatedAt,
+            expiresAt: new Date(entry.expiresAt).toISOString()
+        }
+    };
+}
+
+function stableStringify(value) {
+    if (Array.isArray(value)) return '[' + value.map(stableStringify).join(',') + ']';
+    if (value && typeof value === 'object') {
+        return '{' + Object.keys(value).sort().map(key => JSON.stringify(key) + ':' + stableStringify(value[key])).join(',') + '}';
+    }
+    return JSON.stringify(value);
+}
+
+function markCacheStatus(res, status) {
+    if (!res || !res.locals) return;
+    if (!res.locals.cacheStatus || res.locals.cacheStatus === 'none') {
+        res.locals.cacheStatus = status;
+    } else if (!res.locals.cacheStatus.split(',').includes(status)) {
+        res.locals.cacheStatus += ',' + status;
+    }
+}
+
+function pruneCache(cache, limit) {
+    const keys = Object.keys(cache);
+    if (keys.length <= limit) return;
+    keys
+        .sort((a, b) => cache[a].expiresAt - cache[b].expiresAt)
+        .slice(0, keys.length - limit)
+        .forEach(key => delete cache[key]);
+}
+
+async function getDealListCached(req, res, client, params = {}, ttl = DEAL_LIST_TTL) {
+    const domain = client.domain || req.query.domain || 'default';
+    const forceRefresh = req.query.forceRefresh === 'true';
+    const key = domain + ':crm.deal.list:' + stableStringify(params);
+    const cached = _dealListCache[key];
+
+    if (!forceRefresh && cached && Date.now() < cached.expiresAt) {
+        markCacheStatus(res, 'deal-list-hit');
+        return cached.data;
+    }
+
+    if (_dealListInflight[key]) {
+        markCacheStatus(res, forceRefresh ? 'deal-list-force-inflight' : 'deal-list-inflight');
+        return _dealListInflight[key];
+    }
+
+    markCacheStatus(res, forceRefresh ? 'deal-list-bypass' : 'deal-list-miss');
+    const pending = getAll(client, 'crm.deal.list', params).then(data => {
+        _dealListCache[key] = {
+            data,
+            updatedAt: new Date().toISOString(),
+            expiresAt: Date.now() + ttl
+        };
+        pruneCache(_dealListCache, DEAL_LIST_CACHE_LIMIT);
+        return data;
+    }).finally(() => {
+        if (_dealListInflight[key] === pending) delete _dealListInflight[key];
+    });
+    _dealListInflight[key] = pending;
+    return pending;
+}
 
 async function buildStageMap(client, domainKey) {
     const domain = domainKey || client.domain || client._domain || 'default';
@@ -138,6 +251,13 @@ async function getSuccessStageIds(client, existingStageMap) {
 app.post('/api/cache/clear', (req, res) => {
     const domain = req.query.domain || 'default';
     delete _stageMapCache[domain];
+    delete _dealsInProgressCache[domain];
+    Object.keys(_dealListCache).forEach(key => {
+        if (key.startsWith(domain + ':')) delete _dealListCache[key];
+    });
+    Object.keys(_dealListInflight).forEach(key => {
+        if (key.startsWith(domain + ':')) delete _dealListInflight[key];
+    });
     res.json({ cleared: domain });
 });
 
@@ -235,30 +355,30 @@ app.get('/api/kpi', async (req, res) => {
         const [successDeals, allDeals, prevSuccessDeals, prevAllDeals] = await Promise.all([
             // Current: deals CREATED in period that are currently in a success stage
             successStageIds.length > 0
-                ? getAll(client, 'crm.deal.list', {
+                ? getDealListCached(req, res, client, {
                     filter: { STAGE_ID: successStageIds, '>=DATE_CREATE': from, '<=DATE_CREATE': to, ...catFilter },
-                    select: ['OPPORTUNITY', 'ASSIGNED_BY_ID']
+                    select: ANALYTICS_DEAL_SELECT
                   })
                 : Promise.resolve({ result: [], total: 0 }),
 
             // Current: all deals created in period (= new leads)
-            getAll(client, 'crm.deal.list', {
+            getDealListCached(req, res, client, {
                 filter: { '>=DATE_CREATE': from, '<=DATE_CREATE': to, ...catFilter },
-                select: ['ID']
+                select: ANALYTICS_DEAL_SELECT
             }),
 
             // Previous: skip when custom range — no meaningful comparison period
             (!isCustomRange && successStageIds.length > 0)
-                ? getAll(client, 'crm.deal.list', {
+                ? getDealListCached(req, res, client, {
                     filter: { STAGE_ID: successStageIds, '>=DATE_CREATE': prev.from, '<=DATE_CREATE': prev.to, ...catFilter },
-                    select: ['OPPORTUNITY']
+                    select: ANALYTICS_DEAL_SELECT
                   })
                 : Promise.resolve({ result: [], total: 0 }),
 
             (!isCustomRange)
-                ? getAll(client, 'crm.deal.list', {
+                ? getDealListCached(req, res, client, {
                     filter: { '>=DATE_CREATE': prev.from, '<=DATE_CREATE': prev.to, ...catFilter },
-                    select: ['ID']
+                    select: ANALYTICS_DEAL_SELECT
                   })
                 : Promise.resolve({ result: [], total: 0 })
         ]);
@@ -292,12 +412,23 @@ app.get('/api/kpi', async (req, res) => {
 app.get('/api/deals/in-progress', async (req, res) => {
     try {
         const client = getClient(req);
-        const stageMap = await buildStageMap(client, req.query.domain || 'default');
+        const domain = client.domain || req.query.domain || 'default';
+        const forceRefresh = req.query.forceRefresh === 'true';
+        const cached = _dealsInProgressCache[domain];
+
+        if (!forceRefresh && cached && Date.now() < cached.expiresAt) {
+            res.locals.cacheStatus = 'hit';
+            return res.json(withCacheMeta(cached.payload, 'hit', cached));
+        }
+
+        res.locals.cacheStatus = forceRefresh ? 'bypass' : 'miss';
+
+        const stageMap = await buildStageMap(client, domain);
 
         const monthAgo = new Date();
         monthAgo.setMonth(monthAgo.getMonth() - 1);
 
-        const allDeals = await getAll(client, 'crm.deal.list', {
+        const allDeals = await getDealListCached(req, res, client, {
             filter: { '>=DATE_CREATE': monthAgo.toISOString().split('T')[0] },
             select: ['ID', 'TITLE', 'OPPORTUNITY', 'ASSIGNED_BY_ID', 'DATE_CREATE',
                      'STAGE_ID', 'CATEGORY_ID', 'SEMANTIC', 'CONTACT_ID', 'COMPANY_ID']
@@ -368,12 +499,20 @@ app.get('/api/deals/in-progress', async (req, res) => {
             }
         });
 
-        res.json({
+        const payload = {
             deals: dealsInProgress,
             total: dealsInProgress.length,
             totalAmount,
             categories: categoryCounts
-        });
+        };
+        const entry = {
+            payload,
+            updatedAt: new Date().toISOString(),
+            expiresAt: Date.now() + DEALS_IN_PROGRESS_TTL
+        };
+        _dealsInProgressCache[domain] = entry;
+
+        res.json(withCacheMeta(payload, res.locals.cacheStatus, entry));
     } catch (e) {
         console.error('[Deals In Progress Error]', e.message);
         res.status(500).json({ error: e.message });
@@ -390,10 +529,9 @@ app.get('/api/deals/leads', async (req, res) => {
         const { from, to } = parsePeriod(period, req.query.from, req.query.to);
         const stageMap = await buildStageMap(client, req.query.domain || 'default');
 
-        const allDeals = await getAll(client, 'crm.deal.list', {
+        const allDeals = await getDealListCached(req, res, client, {
             filter: { '>=DATE_CREATE': from, '<=DATE_CREATE': to },
-            select: ['ID', 'TITLE', 'ASSIGNED_BY_ID', 'DATE_CREATE',
-                     'STAGE_ID', 'SEMANTIC', 'CONTACT_ID', 'SOURCE_ID']
+            select: ANALYTICS_DEAL_SELECT
         });
 
         const deals = allDeals.result.map(deal => {
@@ -432,31 +570,33 @@ app.get('/api/funnel', async (req, res) => {
         const stageListId = categoryId && categoryId !== 'all' ? parseInt(categoryId) : 0;
 
         const specificCategory = catFilter.CATEGORY_ID;
+        const domain = req.query.domain || client.domain || 'default';
 
         // Fetch deals WITH date filter so funnel reflects the selected period.
         // Also fetch stages for selected funnel only (or all if 'all' mode).
-        const [allDeals, stages, categories] = await Promise.all([
-            getAll(client, 'crm.deal.list', {
-                filter: { '>=DATE_CREATE': from, '<=DATE_CREATE': to, ...catFilter },
-                select: ['ID', 'STAGE_ID']
-            }),
-            client.call('crm.dealcategory.stage.list', { id: stageListId }),
-            client.call('crm.dealcategory.list')
-        ]);
+        let allDeals;
+        let stageMap = {};
 
-        // Build stageMap ONLY for the selected funnel when specific category chosen.
-        // In "all" mode load all funnels — but same-named stages (e.g. "Новая заявка"
-        // from 15 funnels) will still merge; that is expected for the overview.
-        const stageMap = {};
-        if (stages.result) stages.result.forEach(s => { stageMap[s.STATUS_ID] = s.NAME; });
-
-        if (!specificCategory && categories.result) {
-            for (const cat of categories.result) {
-                try {
-                    const cs = await client.call('crm.dealcategory.stage.list', { id: cat.ID });
-                    if (cs.result) cs.result.forEach(s => { stageMap[s.STATUS_ID] = s.NAME; });
-                } catch (e) {}
-            }
+        if (specificCategory) {
+            const [deals, stages] = await Promise.all([
+                getDealListCached(req, res, client, {
+                    filter: { '>=DATE_CREATE': from, '<=DATE_CREATE': to, ...catFilter },
+                    select: ANALYTICS_DEAL_SELECT
+                }),
+                client.call('crm.dealcategory.stage.list', { id: stageListId })
+            ]);
+            allDeals = deals;
+            if (stages.result) stages.result.forEach(s => { stageMap[s.STATUS_ID] = s.NAME; });
+        } else {
+            const [deals, cachedStageMap] = await Promise.all([
+                getDealListCached(req, res, client, {
+                    filter: { '>=DATE_CREATE': from, '<=DATE_CREATE': to },
+                    select: ANALYTICS_DEAL_SELECT
+                }),
+                buildStageMap(client, domain)
+            ]);
+            allDeals = deals;
+            stageMap = cachedStageMap;
         }
         // When specific funnel is selected: stageMap already contains ONLY that
         // funnel's stages from the crm.dealcategory.stage.list call above.
@@ -489,9 +629,9 @@ app.get('/api/sources', async (req, res) => {
         const { from, to } = parsePeriod(period, req.query.from, req.query.to);
 
         const [deals, sourceStatuses] = await Promise.all([
-            getAll(client, 'crm.deal.list', {
+            getDealListCached(req, res, client, {
                 filter: { '>=DATE_CREATE': from, '<=DATE_CREATE': to },
-                select: ['ID', 'SOURCE_ID']
+                select: ANALYTICS_DEAL_SELECT
             }),
             client.call('crm.status.list', { filter: { ENTITY_ID: 'SOURCE' } })
         ]);
@@ -545,15 +685,15 @@ app.get('/api/managers', async (req, res) => {
         const [rosterManagers, allPeriodDeals, successDeals] = await Promise.all([
             getRoster(client, domain),
             // Period stats: all deals in selected period
-            getAll(client, 'crm.deal.list', {
+            getDealListCached(req, res, client, {
                 filter: { '>=DATE_CREATE': from, '<=DATE_CREATE': to, ...catFilter },
-                select: ['ID', 'ASSIGNED_BY_ID', 'STAGE_ID', 'SEMANTIC']
+                select: ANALYTICS_DEAL_SELECT
             }),
             // Success deals: for revenue
             successStageIds.length > 0
-                ? getAll(client, 'crm.deal.list', {
+                ? getDealListCached(req, res, client, {
                     filter: { STAGE_ID: successStageIds, '>=DATE_CREATE': from, '<=DATE_CREATE': to, ...catFilter },
-                    select: ['OPPORTUNITY', 'ASSIGNED_BY_ID']
+                    select: ANALYTICS_DEAL_SELECT
                   })
                 : Promise.resolve({ result: [] })
         ]);
@@ -620,15 +760,15 @@ app.get('/api/channels', async (req, res) => {
 
         const [deals, wonDeals, sourceStatuses] = await Promise.all([
             // All deals in period — total count per source
-            getAll(client, 'crm.deal.list', {
+            getDealListCached(req, res, client, {
                 filter: { '>=DATE_CREATE': from, '<=DATE_CREATE': to },
-                select: ['ID', 'SOURCE_ID']
+                select: ANALYTICS_DEAL_SELECT
             }),
             // Won deals in period — used for conversion per source
             successStageIds.length > 0
-                ? getAll(client, 'crm.deal.list', {
+                ? getDealListCached(req, res, client, {
                     filter: { STAGE_ID: successStageIds, '>=DATE_CREATE': from, '<=DATE_CREATE': to },
-                    select: ['ID', 'SOURCE_ID']
+                    select: ANALYTICS_DEAL_SELECT
                   })
                 : Promise.resolve({ result: [] }),
             client.call('crm.status.list', { filter: { ENTITY_ID: 'SOURCE' } })

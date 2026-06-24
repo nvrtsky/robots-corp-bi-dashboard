@@ -40,6 +40,7 @@ let dealsInProgressData = {
     deals: [], total: 0, totalAmount: 0,
     categories: { fresh: 0, normal: 0, warning: 0, critical: 0 }
 };
+let dealsInProgressTimer = null;
 let currentDealFilter = 'all';
 let currentDealPage   = 1;
 const dealsPerPage    = 5;
@@ -164,16 +165,8 @@ function applyCustomDateRange() {
 
     document.getElementById('date-picker-popover').style.display = 'none';
 
-    // Reload all widgets with new range
-    showAllSkeletons();
-    Promise.all([
-        fetchKPI(kpiPeriod),
-        fetchFunnel(funnelPeriod, funnelCategory),
-        fetchSources(sourcesPeriod),
-        fetchManagers(mgrPeriod),
-        fetchChannels(chnPeriod),
-        fetchDealsInProgress()
-    ]);
+    showKpiSkeletons();
+    fetchKPI(kpiPeriod);
 }
 
 function clearCustomDateRange() {
@@ -194,15 +187,8 @@ function clearCustomDateRange() {
     document.getElementById('custom-date-from').value = '';
     document.getElementById('custom-date-to').value   = '';
 
-    showAllSkeletons();
-    Promise.all([
-        fetchKPI(kpiPeriod),
-        fetchFunnel(funnelPeriod, funnelCategory),
-        fetchSources(sourcesPeriod),
-        fetchManagers(mgrPeriod),
-        fetchChannels(chnPeriod),
-        fetchDealsInProgress()
-    ]);
+    showKpiSkeletons();
+    fetchKPI(kpiPeriod);
 }
 
 // Close KPI popover when clicking outside
@@ -282,6 +268,7 @@ function clearWidgetPicker() {
     var widget = _activePickerWidget;
     if (!widget) return;
     widgetCustomRanges[widget] = null;
+    var defaultPeriod = 'day';
 
     // Reset calendar button style
     var calBtn = document.getElementById('cal-btn-' + widget);
@@ -292,7 +279,10 @@ function clearWidgetPicker() {
     if (periodBtnSel) {
         var btns = document.querySelectorAll(periodBtnSel);
         btns.forEach(function(b) { b.classList.remove('active'); });
-        if (btns[0]) btns[0].classList.add('active');
+        if (btns[0]) {
+            btns[0].classList.add('active');
+            defaultPeriod = btns[0].dataset.period || defaultPeriod;
+        }
     }
 
     document.getElementById('widget-date-from').value = '';
@@ -301,10 +291,10 @@ function clearWidgetPicker() {
     _activePickerWidget = null;
 
     // Reload with default period
-    if (widget === 'funnel')   fetchFunnel(funnelPeriod, funnelCategory);
-    if (widget === 'sources')  fetchSources(sourcesPeriod);
-    if (widget === 'managers') fetchManagers(mgrPeriod);
-    if (widget === 'channels') fetchChannels(chnPeriod);
+    if (widget === 'funnel')   fetchFunnel(defaultPeriod, funnelCategory);
+    if (widget === 'sources')  fetchSources(defaultPeriod);
+    if (widget === 'managers') fetchManagers(defaultPeriod);
+    if (widget === 'channels') fetchChannels(defaultPeriod);
 }
 
 // Custom-range fetch wrappers — pass from/to directly, don't touch period state
@@ -356,13 +346,17 @@ async function fetchChannelsCustom(from, to) {
 }
 
 function initAll() {
-    loadFunnels();       // loadFunnels() calls fetchFunnel() after auto-selecting first funnel
-    fetchKPI(kpiPeriod);
-    // fetchFunnel is NOT called here — loadFunnels() handles it to avoid race condition
-    fetchSources(sourcesPeriod);
-    fetchManagers(mgrPeriod);
-    fetchChannels(chnPeriod);
-    fetchDealsInProgress();
+    const primaryLoads = [
+        loadFunnels(),       // loadFunnels() calls fetchFunnel() after auto-selecting first funnel
+        fetchKPI(kpiPeriod),
+        // fetchFunnel is NOT called here — loadFunnels() handles it to avoid race condition
+        fetchSources(sourcesPeriod),
+        fetchManagers(mgrPeriod),
+        fetchChannels(chnPeriod)
+    ];
+    Promise.allSettled(primaryLoads).finally(function() {
+        scheduleDealsInProgressLoad(0, false);
+    });
 }
 
 // ── Skeleton helpers ───────────────────────────────────────────
@@ -441,14 +435,26 @@ function showAllSkeletons() {
     showDealsSkeleton();
 }
 
+function showKpiSkeletons() {
+    ['revenue','leads','conversion'].forEach(function(cls) {
+        const card = document.querySelector('.kpi-card.' + cls);
+        if (!card) return;
+        const v = card.querySelector('.kpi-value');
+        const c = card.querySelector('.kpi-change');
+        if (v) v.classList.add('skeleton');
+        if (c) c.classList.add('skeleton');
+    });
+}
+
 // ── 1. KPI ─────────────────────────────────────────────────────
-async function fetchKPI(period) {
+async function fetchKPI(period, forceRefresh) {
     kpiPeriod = period;
     if (!customDateFrom) updateDateRangeDisplay(period);
     try {
         var kpiParams = customDateFrom && customDateTo
             ? { from: customDateFrom, to: customDateTo }
             : { period: period };
+        if (forceRefresh) kpiParams.forceRefresh = 'true';
         const res = await fetch(buildUrl('/api/kpi', kpiParams));
         const d   = await res.json();
         if (d.error) return;
@@ -464,9 +470,18 @@ async function fetchKPI(period) {
 }
 
 // ── 2. Deals In Progress (always independent) ──────────────────
-async function fetchDealsInProgress() {
+function scheduleDealsInProgressLoad(delay, forceRefresh) {
+    if (dealsInProgressTimer) clearTimeout(dealsInProgressTimer);
+    dealsInProgressTimer = setTimeout(function() {
+        dealsInProgressTimer = null;
+        fetchDealsInProgress(!!forceRefresh);
+    }, delay || 0);
+}
+
+async function fetchDealsInProgress(forceRefresh) {
     try {
-        const res  = await fetch(buildUrl('/api/deals/in-progress'));
+        const params = forceRefresh ? { forceRefresh: 'true' } : {};
+        const res  = await fetch(buildUrl('/api/deals/in-progress', params));
         const data = await res.json();
         if (data.error) { console.error('Deals error:', data.error); return; }
         dealsInProgressData = data;
@@ -604,13 +619,14 @@ function changeDealPage(dir) {
 }
 
 // ── 3. Funnel ──────────────────────────────────────────────────
-async function fetchFunnel(period, category) {
+async function fetchFunnel(period, category, forceRefresh) {
     if (category === undefined) category = funnelCategory;
     funnelPeriod   = period;
     funnelCategory = category;
     setBtnActive('.funnel-period-btn', period);
     const params = { period: period };
     if (category && category !== 'all') params.categoryId = category;
+    if (forceRefresh) params.forceRefresh = 'true';
     try {
         const res = await fetch(buildUrl('/api/funnel', params));
         const d   = await res.json();
@@ -662,11 +678,13 @@ function changeFunnelPage(dir) {
 }
 
 // ── 4. Sources (paginated legend 5/page) ──────────────────────
-async function fetchSources(period) {
+async function fetchSources(period, forceRefresh) {
     sourcesPeriod = period;
     setBtnActive('.sources-period-btn', period);
+    const params = { period: period };
+    if (forceRefresh) params.forceRefresh = 'true';
     try {
-        const res = await fetch(buildUrl('/api/sources', { period: period }));
+        const res = await fetch(buildUrl('/api/sources', params));
         const d   = await res.json();
         if (d.sources) renderDonut(d.sources);
     } catch(e) { console.error('fetchSources', e); }
@@ -788,7 +806,7 @@ function changeSourcesPage(dir) {
 // If a newer call arrives before this one resolves, we discard the stale response.
 var _mgrGen = 0;
 
-async function fetchManagers(period) {
+async function fetchManagers(period, forceRefresh) {
     const myGen = ++_mgrGen;
 
     mgrPeriod = period;
@@ -797,7 +815,9 @@ async function fetchManagers(period) {
     const container = document.querySelector('.managers-card .managers-list');
     if (container) container.innerHTML = '<div style="display:flex;align-items:center;justify-content:center;height:220px;"><div style="width:36px;height:36px;border-radius:50%;border:3px solid var(--border-color);border-top-color:var(--accent-primary);animation:mgr-spin 0.8s linear infinite;"></div></div><style>@keyframes mgr-spin{to{transform:rotate(360deg)}}</style>';
     try {
-        const res = await fetch(buildUrl('/api/managers', { period: period }));
+        const params = { period: period };
+        if (forceRefresh) params.forceRefresh = 'true';
+        const res = await fetch(buildUrl('/api/managers', params));
         const d   = await res.json();
         // Discard if a newer request was started while we were waiting
         if (myGen !== _mgrGen) return;
@@ -879,9 +899,11 @@ function sortMgr(managers, by) {
 }
 
 // ── 6. Channels (paginated, absolute count) ───────────────────
-async function fetchChannels(period) {
+async function fetchChannels(period, forceRefresh) {
     chnPeriod = period;
     setBtnActive('.chn-period-btn', period);
+    const params = { period: period };
+    if (forceRefresh) params.forceRefresh = 'true';
     const chnContainer = document.getElementById('channels-container');
     if (chnContainer) chnContainer.innerHTML =
         '<div style="display:flex;flex-direction:column;gap:16px;padding:8px 0;">' +
@@ -890,7 +912,7 @@ async function fetchChannels(period) {
             '<div class="skeleton" style="height:32px;border-radius:8px;"></div>' +
             '</div>').join('') + '</div>';
     try {
-        const res = await fetch(buildUrl('/api/channels', { period: period }));
+        const res = await fetch(buildUrl('/api/channels', params));
         const d   = await res.json();
         if (d.sources) {
             window._channelSources = d.sources;
@@ -1021,7 +1043,7 @@ async function loadFunnels() {
                 if (specific.length > 0) {
                     sel.value = specific[0].ID;
                     funnelCategory = specific[0].ID;
-                    fetchFunnel(funnelPeriod, specific[0].ID);
+                    await fetchFunnel(funnelPeriod, specific[0].ID);
                 }
             }
         }
@@ -1049,6 +1071,16 @@ function initSourcesControls() {
 function initNavButtons() {
     document.querySelectorAll('.main-kpi-btn').forEach(function(btn) {
         btn.addEventListener('click', function() {
+            customDateFrom = null;
+            customDateTo = null;
+            var rangeBtn = document.getElementById('date-range-btn');
+            if (rangeBtn) rangeBtn.style.color = '';
+            var fromInput = document.getElementById('custom-date-from');
+            var toInput = document.getElementById('custom-date-to');
+            var popover = document.getElementById('date-picker-popover');
+            if (fromInput) fromInput.value = '';
+            if (toInput) toInput.value = '';
+            if (popover) popover.style.display = 'none';
             document.querySelectorAll('.main-kpi-btn').forEach(function(b) { b.classList.remove('active'); });
             btn.classList.add('active');
             ['revenue','leads','conversion'].forEach(function(cls) {
@@ -1116,13 +1148,13 @@ function initRefreshButton() {
         svg.style.transform  = 'rotate(360deg)';
 
         await Promise.all([
-            fetchKPI(kpiPeriod),
-            fetchFunnel(funnelPeriod, funnelCategory),
-            fetchSources(sourcesPeriod),
-            fetchManagers(mgrPeriod),
-            fetchChannels(chnPeriod),
-            fetchDealsInProgress()
+            fetchKPI(kpiPeriod, true),
+            fetchFunnel(funnelPeriod, funnelCategory, true),
+            fetchSources(sourcesPeriod, true),
+            fetchManagers(mgrPeriod, true),
+            fetchChannels(chnPeriod, true)
         ]);
+        fetchDealsInProgress(true);
 
         setTimeout(function() { svg.style.transition = 'none'; svg.style.transform = 'rotate(0deg)'; }, 800);
         setTimeout(function() { cd = false; btn.disabled = false; }, 3000);
@@ -1236,15 +1268,32 @@ function changePageMgrPage(dir) {
 let leadsPage = 1;
 const leadsPerPage = 5;
 let currentLeads = [];
+let allPageLeads = [];
+let allPageLeadsPeriod = null;
 
 function setLeadsStatus(status, btn) {
     pageLeadsStatus = status;
     document.querySelectorAll('#page-leads .widget-filter-btn').forEach(function(b) { b.classList.remove('active'); });
     if (btn) btn.classList.add('active');
-    loadPageLeads(status, pageLeadsPeriod);
+    if (allPageLeadsPeriod === pageLeadsPeriod) applyLeadsStatus(status);
+    else loadPageLeads(status, pageLeadsPeriod);
 }
 
-async function loadPageLeads(status, period) {
+function applyLeadsStatus(status) {
+    // Все = все сделки (успешные + в работе + неуспешные)
+    // Принятые = успешные + в работе (!isFail)
+    // Непринятые = только FAIL_STAGES
+    var leads;
+    if (status === 'accepted')      leads = allPageLeads.filter(function(l) { return !l.isFail; });
+    else if (status === 'rejected') leads = allPageLeads.filter(function(l) { return l.isFail; });
+    else                            leads = allPageLeads;
+
+    currentLeads = leads;
+    leadsPage = 1;
+    renderLeadsPage();
+}
+
+async function loadPageLeads(status, period, forceRefresh) {
     status = status || pageLeadsStatus;
     period = period || pageLeadsPeriod;
     pageLeadsStatus = status;
@@ -1254,7 +1303,9 @@ async function loadPageLeads(status, period) {
     container.innerHTML = '<div style="display:flex;align-items:center;justify-content:center;height:160px;"><div style="width:32px;height:32px;border-radius:50%;border:3px solid var(--border-color);border-top-color:var(--accent-primary);animation:mgr-spin 0.8s linear infinite;"></div></div>';
     try {
         // Use /api/deals/leads which includes FAIL_STAGES deals (unlike in-progress)
-        const res = await fetch(buildUrl('/api/deals/leads', { period: period }));
+        const params = { period: period };
+        if (forceRefresh) params.forceRefresh = 'true';
+        const res = await fetch(buildUrl('/api/deals/leads', params));
         const d   = await res.json();
 
         var allDeals = (d.deals || []).map(function(deal) {
@@ -1276,15 +1327,9 @@ async function loadPageLeads(status, period) {
             };
         });
 
-        // Все = все сделки (успешные + в работе + неуспешные)
-        // Принятые = успешные + в работе (!isFail)
-        // Непринятые = только FAIL_STAGES
-        var leads;
-        if (status === 'accepted')      leads = allDeals.filter(function(l) { return !l.isFail; });
-        else if (status === 'rejected') leads = allDeals.filter(function(l) { return l.isFail; });
-        else                            leads = allDeals;
-
-        currentLeads = leads; leadsPage = 1; renderLeadsPage();
+        allPageLeads = allDeals;
+        allPageLeadsPeriod = period;
+        applyLeadsStatus(status);
     } catch(e) {
         container.innerHTML = '<div style="padding:32px;color:var(--danger);">Ошибка загрузки</div>';
     }
