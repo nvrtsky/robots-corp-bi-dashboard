@@ -464,8 +464,10 @@ function scheduleCacheWarmup(delayMs) {
     if (_warmupTimer) clearTimeout(_warmupTimer);
     _warmupTimer = setTimeout(async () => {
         _warmupTimer = null;
+        const started = Date.now();
         await runCacheWarmup();
-        scheduleCacheWarmup(WARMUP_INTERVAL_MS);
+        const nextDelay = Math.max(1000, WARMUP_INTERVAL_MS - (Date.now() - started));
+        scheduleCacheWarmup(nextDelay);
     }, delayMs);
 
     if (_warmupTimer.unref) _warmupTimer.unref();
