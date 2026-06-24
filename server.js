@@ -138,12 +138,28 @@ const _dealsInProgressCache = {}; // domain → { payload, updatedAt, expiresAt 
 const DEALS_IN_PROGRESS_TTL = 2 * 60 * 1000;
 const _dealListCache = {}; // key → { data, updatedAt, expiresAt }
 const _dealListInflight = {}; // key → Promise
-const DEAL_LIST_TTL = 5 * 60 * 1000;
+const DEAL_LIST_TTL = 2 * 60 * 1000;
+const HISTORICAL_DEAL_LIST_TTL = 30 * 60 * 1000;
 const DEAL_LIST_CACHE_LIMIT = 100;
 const ANALYTICS_DEAL_SELECT = [
     'ID', 'TITLE', 'OPPORTUNITY', 'ASSIGNED_BY_ID', 'DATE_CREATE',
     'STAGE_ID', 'SEMANTIC', 'SOURCE_ID', 'CATEGORY_ID'
 ];
+const WARMUP_DEFAULT_DOMAIN = 'robotcorporation.bitrix24.ru';
+const WARMUP_ENABLED = process.env.CACHE_WARMUP_ENABLED !== 'false';
+const WARMUP_INTERVAL_MS = parsePositiveInt(process.env.CACHE_WARMUP_INTERVAL_MS, 110 * 1000);
+const WARMUP_INITIAL_DELAY_MS = parsePositiveInt(process.env.CACHE_WARMUP_INITIAL_DELAY_MS, 15 * 1000);
+const WARMUP_PERIODS = (process.env.CACHE_WARMUP_PERIODS || 'day,month')
+    .split(',')
+    .map(period => period.trim())
+    .filter(Boolean);
+let _warmupRunning = false;
+let _warmupTimer = null;
+
+function parsePositiveInt(value, fallback) {
+    const parsed = parseInt(value, 10);
+    return Number.isFinite(parsed) && parsed > 0 ? parsed : fallback;
+}
 
 function withCacheMeta(payload, status, entry) {
     return {
@@ -212,6 +228,24 @@ async function getDealListCached(req, res, client, params = {}, ttl = DEAL_LIST_
     });
     _dealListInflight[key] = pending;
     return pending;
+}
+
+function createInternalCacheContext(domain, forceRefresh) {
+    return {
+        req: { query: { domain, forceRefresh: forceRefresh ? 'true' : undefined }, headers: {} },
+        res: { locals: { cacheStatus: 'none' } }
+    };
+}
+
+async function warmDealListCache(client, domain, label, params, ttl = DEAL_LIST_TTL, forceRefresh = true) {
+    const started = Date.now();
+    const { req, res } = createInternalCacheContext(domain, forceRefresh);
+    const data = await getDealListCached(req, res, client, params, ttl);
+    console.log(
+        `[warmup] deal-list ${label} ok duration=${Date.now() - started}ms ` +
+        `cache=${res.locals.cacheStatus || 'none'} total=${data.total || data.result.length}`
+    );
+    return data;
 }
 
 async function buildStageMap(client, domainKey) {
@@ -316,6 +350,127 @@ const getClient = (req) => {
     return new BitrixClient(domain);
 };
 
+function getWarmupDomains() {
+    const envDomains = (process.env.CACHE_WARMUP_DOMAINS || process.env.DEFAULT_DOMAIN || '')
+        .split(',')
+        .map(domain => domain.trim())
+        .filter(Boolean);
+    if (envDomains.length > 0) return [...new Set(envDomains)];
+
+    const tokens = storage.getAll();
+    const tokenDomains = tokens ? Object.keys(tokens).filter(Boolean) : [];
+    if (tokenDomains.length > 0) {
+        if (tokenDomains.includes(WARMUP_DEFAULT_DOMAIN)) return [WARMUP_DEFAULT_DOMAIN];
+        return [tokenDomains[0]];
+    }
+
+    return [WARMUP_DEFAULT_DOMAIN];
+}
+
+function periodDealParams(from, to, extraFilter) {
+    return {
+        filter: { '>=DATE_CREATE': from, '<=DATE_CREATE': to, ...(extraFilter || {}) },
+        select: ANALYTICS_DEAL_SELECT
+    };
+}
+
+async function warmPeriodDealCaches(client, domain, period, successStageIds) {
+    const { from, to } = parsePeriod(period);
+    const prev = prevPeriod(from, to);
+    const tasks = [
+        warmDealListCache(client, domain, `${period}:all`, periodDealParams(from, to)),
+        warmDealListCache(
+            client,
+            domain,
+            `${period}:prev-all`,
+            periodDealParams(prev.from, prev.to),
+            HISTORICAL_DEAL_LIST_TTL,
+            false
+        )
+    ];
+
+    if (successStageIds.length > 0) {
+        tasks.push(
+            warmDealListCache(
+                client,
+                domain,
+                `${period}:success`,
+                periodDealParams(from, to, { STAGE_ID: successStageIds })
+            ),
+            warmDealListCache(
+                client,
+                domain,
+                `${period}:prev-success`,
+                periodDealParams(prev.from, prev.to, { STAGE_ID: successStageIds }),
+                HISTORICAL_DEAL_LIST_TTL,
+                false
+            )
+        );
+    }
+
+    await Promise.all(tasks);
+}
+
+async function warmDealsInProgress(client, domain) {
+    const started = Date.now();
+    const { req, res } = createInternalCacheContext(domain, true);
+    const { payload } = await refreshDealsInProgressCache(client, domain, req, res);
+    console.log(
+        `[warmup] deals-in-progress ok duration=${Date.now() - started}ms ` +
+        `cache=${res.locals.cacheStatus || 'none'} total=${payload.total}`
+    );
+}
+
+async function runCacheWarmup() {
+    if (!WARMUP_ENABLED) return;
+    if (_warmupRunning) {
+        console.log('[warmup] skipped: previous run still active');
+        return;
+    }
+
+    _warmupRunning = true;
+    const started = Date.now();
+    const domains = getWarmupDomains();
+    console.log(`[warmup] started domains=${domains.join(',')} periods=${WARMUP_PERIODS.join(',')}`);
+
+    try {
+        for (const domain of domains) {
+            const client = new BitrixClient(domain);
+            const stageMap = await buildStageMap(client, domain);
+            const successStageIds = await getSuccessStageIds(client, stageMap);
+            await getRoster(client, domain);
+
+            for (const period of WARMUP_PERIODS) {
+                await warmPeriodDealCaches(client, domain, period, successStageIds);
+            }
+
+            await warmDealsInProgress(client, domain);
+        }
+
+        console.log(`[warmup] success duration=${Date.now() - started}ms`);
+    } catch (e) {
+        console.error(`[warmup] failed duration=${Date.now() - started}ms error=${e.message}`);
+    } finally {
+        _warmupRunning = false;
+    }
+}
+
+function scheduleCacheWarmup(delayMs) {
+    if (!WARMUP_ENABLED) {
+        console.log('[warmup] disabled');
+        return;
+    }
+
+    if (_warmupTimer) clearTimeout(_warmupTimer);
+    _warmupTimer = setTimeout(async () => {
+        _warmupTimer = null;
+        await runCacheWarmup();
+        scheduleCacheWarmup(WARMUP_INTERVAL_MS);
+    }, delayMs);
+
+    if (_warmupTimer.unref) _warmupTimer.unref();
+}
+
 // ── Static routes ──────────────────────────────────────────────
 const serveIndex = (req, res) => res.sendFile(path.join(__dirname, 'index.html'));
 app.get('/', serveIndex);
@@ -407,6 +562,96 @@ app.get('/api/kpi', async (req, res) => {
     }
 });
 
+async function refreshDealsInProgressCache(client, domain, cacheReq, cacheRes) {
+    const stageMap = await buildStageMap(client, domain);
+
+    const monthAgo = new Date();
+    monthAgo.setMonth(monthAgo.getMonth() - 1);
+
+    const allDeals = await getDealListCached(cacheReq, cacheRes, client, {
+        filter: { '>=DATE_CREATE': monthAgo.toISOString().split('T')[0] },
+        select: ['ID', 'TITLE', 'OPPORTUNITY', 'ASSIGNED_BY_ID', 'DATE_CREATE',
+                 'STAGE_ID', 'CATEGORY_ID', 'SEMANTIC', 'CONTACT_ID', 'COMPANY_ID']
+    }, DEALS_IN_PROGRESS_TTL);
+
+    const now = new Date();
+    const dealsInProgress = [];
+    let totalAmount = 0;
+    const categoryCounts = { fresh: 0, normal: 0, warning: 0, critical: 0 };
+
+    for (const deal of allDeals.result) {
+        const stageName = stageMap[deal.STAGE_ID] || deal.STAGE_ID;
+        let isSuccess = SUCCESS_STAGES.includes(stageName);
+        let isFail    = FAIL_STAGES.includes(stageName);
+        if (!isSuccess && !isFail && deal.SEMANTIC) {
+            isSuccess = deal.SEMANTIC === 'S';
+            isFail    = deal.SEMANTIC === 'F';
+        }
+        if (isSuccess || isFail) continue;
+
+        const created = new Date(deal.DATE_CREATE);
+        const days = Math.floor((now - created) / (1000 * 60 * 60 * 24));
+        let cat;
+        if      (days < 7)  { cat = 'fresh';    categoryCounts.fresh++; }
+        else if (days < 14) { cat = 'normal';   categoryCounts.normal++; }
+        else if (days < 30) { cat = 'warning';  categoryCounts.warning++; }
+        else                { cat = 'critical'; categoryCounts.critical++; }
+
+        totalAmount += parseFloat(deal.OPPORTUNITY) || 0;
+        dealsInProgress.push({
+            ID: deal.ID,
+            TITLE: deal.TITLE || 'Без названия',
+            OPPORTUNITY: parseFloat(deal.OPPORTUNITY) || 0,
+            ASSIGNED_BY_ID: deal.ASSIGNED_BY_ID,
+            CONTACT_ID: deal.CONTACT_ID || null,
+            COMPANY_ID: deal.COMPANY_ID || null,
+            DATE_CREATE: deal.DATE_CREATE,
+            STAGE_ID: deal.STAGE_ID,
+            stageName,
+            daysInProgress: days,
+            durationCategory: cat
+        });
+    }
+
+    const contactIds = [...new Set(
+        dealsInProgress.map(d => d.CONTACT_ID).filter(Boolean)
+    )];
+    const contactMap = {};
+    if (contactIds.length > 0) {
+        try {
+            const contacts = await getAll(client, 'crm.contact.list', {
+                filter: { ID: contactIds },
+                select: ['ID', 'NAME', 'LAST_NAME']
+            });
+            contacts.result.forEach(c => {
+                contactMap[String(c.ID)] = [c.NAME, c.LAST_NAME].filter(Boolean).join(' ').trim();
+            });
+        } catch(e) { /* non-critical */ }
+    }
+
+    dealsInProgress.forEach(d => {
+        if (d.CONTACT_ID && contactMap[String(d.CONTACT_ID)]) {
+            d.clientName = contactMap[String(d.CONTACT_ID)];
+        } else {
+            d.clientName = '';
+        }
+    });
+
+    const payload = {
+        deals: dealsInProgress,
+        total: dealsInProgress.length,
+        totalAmount,
+        categories: categoryCounts
+    };
+    const entry = {
+        payload,
+        updatedAt: new Date().toISOString(),
+        expiresAt: Date.now() + DEALS_IN_PROGRESS_TTL
+    };
+    _dealsInProgressCache[domain] = entry;
+    return { payload, entry };
+}
+
 // ── Endpoint 2: Deals In Progress (always independent of period) ──
 // Shows deals created in last 30 days that are NOT in success/fail stages
 app.get('/api/deals/in-progress', async (req, res) => {
@@ -423,94 +668,7 @@ app.get('/api/deals/in-progress', async (req, res) => {
 
         res.locals.cacheStatus = forceRefresh ? 'bypass' : 'miss';
 
-        const stageMap = await buildStageMap(client, domain);
-
-        const monthAgo = new Date();
-        monthAgo.setMonth(monthAgo.getMonth() - 1);
-
-        const allDeals = await getDealListCached(req, res, client, {
-            filter: { '>=DATE_CREATE': monthAgo.toISOString().split('T')[0] },
-            select: ['ID', 'TITLE', 'OPPORTUNITY', 'ASSIGNED_BY_ID', 'DATE_CREATE',
-                     'STAGE_ID', 'CATEGORY_ID', 'SEMANTIC', 'CONTACT_ID', 'COMPANY_ID']
-        });
-
-        const now = new Date();
-        const dealsInProgress = [];
-        let totalAmount = 0;
-        const categoryCounts = { fresh: 0, normal: 0, warning: 0, critical: 0 };
-
-        for (const deal of allDeals.result) {
-            const stageName = stageMap[deal.STAGE_ID] || deal.STAGE_ID;
-            let isSuccess = SUCCESS_STAGES.includes(stageName);
-            let isFail    = FAIL_STAGES.includes(stageName);
-            if (!isSuccess && !isFail && deal.SEMANTIC) {
-                isSuccess = deal.SEMANTIC === 'S';
-                isFail    = deal.SEMANTIC === 'F';
-            }
-            if (isSuccess || isFail) continue;
-
-            const created = new Date(deal.DATE_CREATE);
-            const days = Math.floor((now - created) / (1000 * 60 * 60 * 24));
-            let cat;
-            if      (days < 7)  { cat = 'fresh';    categoryCounts.fresh++; }
-            else if (days < 14) { cat = 'normal';   categoryCounts.normal++; }
-            else if (days < 30) { cat = 'warning';  categoryCounts.warning++; }
-            else                { cat = 'critical'; categoryCounts.critical++; }
-
-            totalAmount += parseFloat(deal.OPPORTUNITY) || 0;
-            dealsInProgress.push({
-                ID: deal.ID,
-                TITLE: deal.TITLE || 'Без названия',
-                OPPORTUNITY: parseFloat(deal.OPPORTUNITY) || 0,
-                ASSIGNED_BY_ID: deal.ASSIGNED_BY_ID,
-                CONTACT_ID: deal.CONTACT_ID || null,
-                COMPANY_ID: deal.COMPANY_ID || null,
-                DATE_CREATE: deal.DATE_CREATE,
-                STAGE_ID: deal.STAGE_ID,
-                stageName,
-                daysInProgress: days,
-                durationCategory: cat
-            });
-        }
-
-        // Batch-load contact names for deals that have a CONTACT_ID
-        const contactIds = [...new Set(
-            dealsInProgress.map(d => d.CONTACT_ID).filter(Boolean)
-        )];
-        const contactMap = {};
-        if (contactIds.length > 0) {
-            try {
-                const contacts = await getAll(client, 'crm.contact.list', {
-                    filter: { ID: contactIds },
-                    select: ['ID', 'NAME', 'LAST_NAME']
-                });
-                contacts.result.forEach(c => {
-                    contactMap[String(c.ID)] = [c.NAME, c.LAST_NAME].filter(Boolean).join(' ').trim();
-                });
-            } catch(e) { /* non-critical */ }
-        }
-
-        // Attach clientName to each deal
-        dealsInProgress.forEach(d => {
-            if (d.CONTACT_ID && contactMap[String(d.CONTACT_ID)]) {
-                d.clientName = contactMap[String(d.CONTACT_ID)];
-            } else {
-                d.clientName = '';
-            }
-        });
-
-        const payload = {
-            deals: dealsInProgress,
-            total: dealsInProgress.length,
-            totalAmount,
-            categories: categoryCounts
-        };
-        const entry = {
-            payload,
-            updatedAt: new Date().toISOString(),
-            expiresAt: Date.now() + DEALS_IN_PROGRESS_TTL
-        };
-        _dealsInProgressCache[domain] = entry;
+        const { payload, entry } = await refreshDealsInProgressCache(client, domain, req, res);
 
         res.json(withCacheMeta(payload, res.locals.cacheStatus, entry));
     } catch (e) {
@@ -965,4 +1123,5 @@ app.get('/api/debug/manager-all', async (req, res) => {
 
 app.listen(PORT, () => {
     console.log(`BI Dashboard server running on http://localhost:${PORT}`);
+    scheduleCacheWarmup(WARMUP_INITIAL_DELAY_MS);
 });
